@@ -1,9 +1,17 @@
+# Commands to push updates:
+# Open the terminal in VSCode.
+# Run these two commands:
+# git tag RoleplayEventParser-v1.0.X
+# git push origin RoleplayEventParser-v1.0.X
+# Increment X for new releases.
+
 name: Package and Release Addon
 
 on:
   push:
     tags:
       - 'v*' # Triggers whenever you push a tag starting with 'v' (e.g., v1.0.0)
+      - 'RoleplayEventParser-v*' # Triggers whenever you push a tag starting with 'RoleplayEventParser-v' (e.g., RoleplayEventParser-v1.0.0)
 
 jobs:
   release:
