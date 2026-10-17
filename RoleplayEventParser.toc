@@ -1,5 +1,5 @@
 ## Title: Roleplay Event Parser
-## Version: 1.0.3
+## Version: v1.0.3
 ## Notes: An addon to make it easier for GMs to parse player emotes during roleplay events.
 ## Author: vaminion
 ## Interface: 120105

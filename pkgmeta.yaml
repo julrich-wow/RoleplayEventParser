@@ -1,4 +1,4 @@
-package-as: RoleplayEventParser-@project-version@
+package-as: RoleplayEventParser
 
 manual-changelog:
   filename: CHANGELOG.md
