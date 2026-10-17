@@ -1,15 +1,10 @@
 package-as: RoleplayEventParser-@project-version@
 
-# Release Type (must be singular: release, beta, or alpha)
-release-type: release
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
 
-# Changelog file
-#manual-changelog:
-#  filename: CHANGELOG.md
-#  markup-type: markdown
-
-# Ignore development files
-#ignore:
-#  - .github/
-#  - .gitignore
-#  - README.md
+ignore:
+  - .github/
+  - .gitignore
+  - README.md
