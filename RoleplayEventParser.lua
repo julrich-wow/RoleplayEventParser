@@ -1,0 +1,963 @@
+-- Initialize addon variables and viewer frame.
+local addonName, addonTable = ...
+local frameName = "RoleplayEventParserFrame"
+
+-------------------------------------------------------------------------------
+-- 0. Configuration & Local Performance Caches
+-------------------------------------------------------------------------------
+local GetTime = GetTime
+local date = date
+local UnitName = UnitName
+local Ambiguate = Ambiguate
+local IsInGroup = IsInGroup
+local IsInRaid = IsInRaid
+local IsInInstance = IsInInstance
+local GetNumGroupMembers = GetNumGroupMembers
+local GetNumSubgroupMembers = GetNumSubgroupMembers
+local string_lower = string.lower
+local string_find = string.find
+local table_insert = table.insert
+local table_sort = table.sort
+local math_max = math.max
+local vep_tooltip_delay = 1.0
+
+local VEP_CONFIG = {
+    DEFAULT_WIDTH = 680,
+    DEFAULT_HEIGHT = 400,
+    MIN_WIDTH = 680,
+    MIN_HEIGHT = 200,
+    MAX_WIDTH = 1400,
+    MAX_HEIGHT = 1000,
+    DOUBLE_CLICK_THRESHOLD = 0.3,
+    
+    COLUMNS = {
+        { name = "Time",         width = 65,  wrap = false },
+        { name = "Character",    width = 120, wrap = true  },
+        { name = "Avatar Name",  width = 110, wrap = true  },
+        { name = "Emote Result", width = 120, wrap = true  },
+        { name = "Emote Text",   width = 220, wrap = true  }
+    },
+    
+    KEYWORDS = { "damage", "safe", "guarding", "intercepting", "hitpoints", "hit points", "hit%-points", "heal" },
+    
+    EVENTS = {
+        "ADDON_LOADED",
+        "CHAT_MSG_SAY",
+        "CHAT_MSG_PARTY",
+        "CHAT_MSG_PARTY_LEADER",
+        "CHAT_MSG_RAID",
+        "CHAT_MSG_RAID_LEADER",
+        "CHAT_MSG_RAID_WARNING",
+        "CHAT_MSG_EMOTE",
+        "CHAT_MSG_INSTANCE_CHAT",
+        "CHAT_MSG_INSTANCE_CHAT_LEADER",
+        "READY_CHECK"
+    }
+}
+
+-- Safe local trim helper function
+local function trim(s)
+    return s and s:gsub("^%s*(.-)%s*$", "%1") or ""
+end
+
+-------------------------------------------------------------------------------
+-- 1. Create Main Window Frame & Confirm Dialog
+-------------------------------------------------------------------------------
+local vep_mainframe = CreateFrame("Frame", frameName, UIParent, "BasicFrameTemplateWithInset")
+vep_mainframe:SetSize(VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT)
+vep_mainframe:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+
+vep_mainframe:SetMovable(true)
+vep_mainframe:SetResizable(true)
+vep_mainframe:SetResizeBounds(VEP_CONFIG.MIN_WIDTH, VEP_CONFIG.MIN_HEIGHT, VEP_CONFIG.MAX_WIDTH, VEP_CONFIG.MAX_HEIGHT)
+vep_mainframe:SetUserPlaced(false)
+vep_mainframe:EnableMouse(true)
+vep_mainframe:RegisterForDrag("LeftButton")
+vep_mainframe:SetScript("OnDragStart", vep_mainframe.StartMoving)
+vep_mainframe:SetScript("OnDragStop", vep_mainframe.StopMovingOrSizing)
+vep_mainframe:SetClampedToScreen(true)
+vep_mainframe:SetToplevel(true)
+vep_mainframe:SetScript("OnMouseDown", function(self) self:Raise() end)
+
+-- Title Bar
+if vep_mainframe.TitleBg then
+    vep_mainframe.TitleBg:SetHeight(30)
+end
+
+vep_mainframe.title = vep_mainframe:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+vep_mainframe.title:ClearAllPoints()
+if vep_mainframe.TitleBg then
+    vep_mainframe.title:SetPoint("LEFT", vep_mainframe.TitleBg, "LEFT", 10, 1)
+else
+    vep_mainframe.title:SetPoint("TOPLEFT", vep_mainframe, "TOPLEFT", 10, -6)
+end
+
+local addonVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version") or GetAddOnMetadata(addonName, "Version")
+local baseTitleText = "Emote Log Viewer"
+if addonVersion and addonVersion ~= "" then
+    baseTitleText = baseTitleText .. " v" .. addonVersion
+end
+vep_mainframe.title:SetText(baseTitleText)
+
+-- Confirmation Dialog Frame
+local confirmFrame = CreateFrame("Frame", nil, vep_mainframe, "BasicFrameTemplateWithInset")
+confirmFrame:SetSize(300, 110)
+confirmFrame:SetPoint("CENTER", vep_mainframe, "CENTER", 0, 0)
+confirmFrame:SetFrameLevel(vep_mainframe:GetFrameLevel() + 20)
+confirmFrame:Hide()
+
+if confirmFrame.TitleBg then
+    confirmFrame.TitleBg:SetHeight(24)
+end
+
+confirmFrame.title = confirmFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+if confirmFrame.TitleBg then
+    confirmFrame.title:SetPoint("LEFT", confirmFrame.TitleBg, "LEFT", 8, 0)
+else
+    confirmFrame.title:SetPoint("TOPLEFT", confirmFrame, "TOPLEFT", 8, -6)
+end
+confirmFrame.title:SetText("Confirm Action")
+
+local confirmText = confirmFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+confirmText:SetPoint("TOP", confirmFrame, "TOP", 0, -32)
+
+local yesButton = CreateFrame("Button", nil, confirmFrame, "UIPanelButtonTemplate")
+yesButton:SetSize(80, 22)
+yesButton:SetPoint("BOTTOMLEFT", confirmFrame, "BOTTOMLEFT", 45, 12)
+yesButton:SetText("Yes")
+yesButton:SetScript("OnClick", function()
+    if confirmFrame.onConfirm then
+        confirmFrame.onConfirm()
+    end
+    confirmFrame:Hide()
+end)
+
+local noButton = CreateFrame("Button", nil, confirmFrame, "UIPanelButtonTemplate")
+noButton:SetSize(80, 22)
+noButton:SetPoint("BOTTOMRIGHT", confirmFrame, "BOTTOMRIGHT", -45, 12)
+noButton:SetText("No")
+noButton:SetScript("OnClick", function() confirmFrame:Hide() end)
+
+local function ShowConfirmDialog(promptText, onConfirmCallback)
+    confirmText:SetText(promptText)
+    confirmFrame.onConfirm = onConfirmCallback
+    confirmFrame:Show()
+end
+
+-------------------------------------------------------------------------------
+-- 2. Header, Reset, Clean Up, Scroll Area & Resize Components
+-------------------------------------------------------------------------------
+local function AttachDelayedTooltip(button, tooltipText, delay)
+    button:SetScript("OnEnter", function(self)
+        if self.tooltipTimer then
+            self.tooltipTimer:Cancel()
+        end
+        self.tooltipTimer = C_Timer.NewTimer(delay or 2.0, function()
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(tooltipText, nil, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+    end)
+
+    button:SetScript("OnLeave", function(self)
+        if self.tooltipTimer then
+            self.tooltipTimer:Cancel()
+            self.tooltipTimer = nil
+        end
+        GameTooltip:Hide()
+    end)
+end
+
+-- Reset Button
+local resetButton = CreateFrame("Button", nil, vep_mainframe, "UIPanelButtonTemplate")
+resetButton:SetSize(50, 20)
+resetButton:SetPoint("BOTTOMLEFT", vep_mainframe, "BOTTOMLEFT", 12, 8)
+resetButton:SetText("Reset")
+resetButton.lastClickTime = 0
+
+AttachDelayedTooltip(resetButton, "Deletes all entries.", vep_tooltip_delay)
+
+resetButton:RegisterForClicks("LeftButtonUp")
+resetButton:SetScript("OnClick", function(self)
+    GameTooltip:Hide()
+    if self.tooltipTimer then self.tooltipTimer:Cancel() end
+
+    local currentTime = GetTime()
+    if (currentTime - (self.lastClickTime or 0)) <= VEP_CONFIG.DOUBLE_CLICK_THRESHOLD then
+        vep_mainframe:ClearLog()
+        confirmFrame:Hide()
+        self.lastClickTime = 0
+    else
+        self.lastClickTime = currentTime
+        ShowConfirmDialog("Clear all entries from the log?", function()
+            vep_mainframe:ClearLog()
+        end)
+    end
+end)
+
+-- Clean Up Logs Button
+local cleanUpButton = CreateFrame("Button", nil, vep_mainframe, "UIPanelButtonTemplate")
+cleanUpButton:SetSize(100, 20)
+cleanUpButton:SetPoint("LEFT", resetButton, "RIGHT", 6, 0)
+cleanUpButton:SetText("Clean Up Logs")
+cleanUpButton.lastClickTime = 0
+
+AttachDelayedTooltip(cleanUpButton, "Deletes entries based on your settings (dimmed and/or pre-ready check).", vep_tooltip_delay)
+
+cleanUpButton:RegisterForClicks("LeftButtonUp")
+cleanUpButton:SetScript("OnClick", function(self)
+    GameTooltip:Hide()
+    if self.tooltipTimer then self.tooltipTimer:Cancel() end
+
+    local currentTime = GetTime()
+    if (currentTime - (self.lastClickTime or 0)) <= VEP_CONFIG.DOUBLE_CLICK_THRESHOLD then
+        vep_mainframe:CleanUpLog()
+        confirmFrame:Hide()
+        self.lastClickTime = 0
+    else
+        self.lastClickTime = currentTime
+        ShowConfirmDialog("Clean up log entries according to rules?", function()
+            vep_mainframe:CleanUpLog()
+        end)
+    end
+end)
+
+-- Initialize innerElements array early to prevent nil pointer errors
+vep_mainframe.innerElements = { resetButton, cleanUpButton }
+
+-- Table Headers
+local headerFrame = CreateFrame("Frame", nil, vep_mainframe)
+headerFrame:SetPoint("TOPLEFT", vep_mainframe, "TOPLEFT", 12, -32)
+headerFrame:SetPoint("TOPRIGHT", vep_mainframe, "TOPRIGHT", -32, -32)
+headerFrame:SetHeight(22)
+
+local headerButtons = {}
+local currentOffsetX = 0
+for i, col in ipairs(VEP_CONFIG.COLUMNS) do
+    local header = CreateFrame("Button", nil, headerFrame, "BackdropTemplate")
+    header:SetSize(col.width, 22)
+    header:SetPoint("LEFT", headerFrame, "LEFT", currentOffsetX, 0)
+    header:SetBackdrop({
+        bgFile = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\Buttons\\WHITE8x8",
+        edgeSize = 1,
+    })
+    header:SetBackdropColor(0.15, 0.15, 0.15, 0.9)
+    header:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+
+    local text = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    text:SetPoint("LEFT", header, "LEFT", 6, 0)
+    text:SetText(col.name)
+    
+    headerButtons[i] = header
+    currentOffsetX = currentOffsetX + col.width
+end
+
+-- Scroll Frame & Content Frame
+local scrollFrame = CreateFrame("ScrollFrame", nil, vep_mainframe, "UIPanelScrollFrameTemplate")
+scrollFrame:SetPoint("TOPLEFT", headerFrame, "BOTTOMLEFT", 0, -4)
+scrollFrame:SetPoint("BOTTOMRIGHT", vep_mainframe, "BOTTOMRIGHT", -32, 36)
+
+local contentFrame = CreateFrame("Frame", nil, scrollFrame)
+contentFrame:SetSize(635, 1)
+scrollFrame:SetScrollChild(contentFrame)
+
+-- Bottom-Right Resize Handle
+local resizeBackdrop = CreateFrame("Frame", nil, vep_mainframe, "BackdropTemplate")
+resizeBackdrop:SetSize(24, 24)
+resizeBackdrop:SetPoint("BOTTOMRIGHT", vep_mainframe, "BOTTOMRIGHT", -3, 3)
+resizeBackdrop:SetFrameLevel(vep_mainframe:GetFrameLevel() + 10)
+resizeBackdrop:SetBackdrop({
+    bgFile = "Interface\\Buttons\\WHITE8x8",
+    edgeFile = "Interface\\Buttons\\WHITE8x8",
+    edgeSize = 1,
+})
+resizeBackdrop:SetBackdropColor(0.1, 0.1, 0.1, 0.85)
+resizeBackdrop:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.9)
+
+local resizeButton = CreateFrame("Button", nil, resizeBackdrop)
+resizeButton:SetSize(16, 16)
+resizeButton:SetPoint("CENTER", resizeBackdrop, "CENTER", 0, 0)
+resizeButton:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+resizeButton:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+resizeButton:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+
+resizeButton:SetScript("OnMouseDown", function(self, button)
+    if button == "LeftButton" then vep_mainframe:StartSizing("BOTTOMRIGHT") end
+end)
+resizeButton:SetScript("OnMouseUp", function() vep_mainframe:StopMovingOrSizing() end)
+
+-------------------------------------------------------------------------------
+-- 3. Settings Frame & Controls
+-------------------------------------------------------------------------------
+local settingsFrame = CreateFrame("Frame", "RoleplayEventParserSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
+settingsFrame:SetSize(420, 520)
+settingsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+settingsFrame:SetMovable(true)
+settingsFrame:EnableMouse(true)
+settingsFrame:RegisterForDrag("LeftButton")
+settingsFrame:SetScript("OnDragStart", settingsFrame.StartMoving)
+settingsFrame:SetScript("OnDragStop", settingsFrame.StopMovingOrSizing)
+settingsFrame:SetClampedToScreen(true)
+settingsFrame:SetToplevel(true)
+settingsFrame:Hide()
+
+if settingsFrame.TitleBg then
+    settingsFrame.TitleBg:SetHeight(30)
+end
+
+settingsFrame.title = settingsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+settingsFrame.title:ClearAllPoints()
+if settingsFrame.TitleBg then
+    settingsFrame.title:SetPoint("LEFT", settingsFrame.TitleBg, "LEFT", 10, 1)
+else
+    settingsFrame.title:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 10, -6)
+end
+settingsFrame.title:SetText(baseTitleText .. " - Settings")
+
+local function CreateSettingsCheckbox(parent, labelText, yOffset, onClickCallback)
+    local cb = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+    cb.text = cb.Text or _G[cb:GetName() .. "Text"]
+    if cb.text then
+        cb.text:SetText(labelText)
+        cb.text:SetFontObject("GameFontHighlightSmall")
+    end
+    cb:SetScript("OnClick", function(self)
+        local checked = self:GetChecked()
+        if onClickCallback then onClickCallback(checked) end
+    end)
+    return cb
+end
+
+local function AddSettingsHeader(parent, text, yOffset)
+    local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    header:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, yOffset)
+    header:SetText(text)
+    return header
+end
+
+AddSettingsHeader(settingsFrame, "Channels to Capture", -38)
+local cbSay = CreateSettingsCheckbox(settingsFrame, "Say (/say)", -60, function(val) if REP_SavedDB then REP_SavedDB.channels = REP_SavedDB.channels or {}; REP_SavedDB.channels.say = val end end)
+local cbParty = CreateSettingsCheckbox(settingsFrame, "Party (/party)", -85, function(val) if REP_SavedDB then REP_SavedDB.channels = REP_SavedDB.channels or {}; REP_SavedDB.channels.party = val end end)
+local cbRaid = CreateSettingsCheckbox(settingsFrame, "Raid / Raid Warning", -110, function(val) if REP_SavedDB then REP_SavedDB.channels = REP_SavedDB.channels or {}; REP_SavedDB.channels.raid = val end end)
+local cbEmote = CreateSettingsCheckbox(settingsFrame, "Emote (/emote)", -135, function(val) if REP_SavedDB then REP_SavedDB.channels = REP_SavedDB.channels or {}; REP_SavedDB.channels.emote = val end end)
+local cbInstance = CreateSettingsCheckbox(settingsFrame, "Instance Chat", -160, function(val) if REP_SavedDB then REP_SavedDB.channels = REP_SavedDB.channels or {}; REP_SavedDB.channels.instance = val end end)
+
+AddSettingsHeader(settingsFrame, "Parse Text When", -190)
+local cbModeUngrouped = CreateSettingsCheckbox(settingsFrame, "Ungrouped", -212, function(val) if REP_SavedDB then REP_SavedDB.modes = REP_SavedDB.modes or {}; REP_SavedDB.modes.ungrouped = val end end)
+local cbModeParty = CreateSettingsCheckbox(settingsFrame, "In a party", -237, function(val) if REP_SavedDB then REP_SavedDB.modes = REP_SavedDB.modes or {}; REP_SavedDB.modes.party = val end end)
+local cbModeRaid = CreateSettingsCheckbox(settingsFrame, "In a raid", -262, function(val) if REP_SavedDB then REP_SavedDB.modes = REP_SavedDB.modes or {}; REP_SavedDB.modes.raid = val end end)
+
+AddSettingsHeader(settingsFrame, "Clean Up Button Behavior", -295)
+local cbCleanPredates = CreateSettingsCheckbox(settingsFrame, "Delete entries predating last ready check", -317, function(val) if REP_SavedDB then REP_SavedDB.cleanup = REP_SavedDB.cleanup or {}; REP_SavedDB.cleanup.predates = val end end)
+local cbCleanDimmed = CreateSettingsCheckbox(settingsFrame, "Delete dimmed entries", -342, function(val) if REP_SavedDB then REP_SavedDB.cleanup = REP_SavedDB.cleanup or {}; REP_SavedDB.cleanup.dimmed = val end end)
+
+AddSettingsHeader(settingsFrame, "Ready Check Behavior", -375)
+local cbReadyDim = CreateSettingsCheckbox(settingsFrame, "Dim old rows when a ready check is detected", -397, function(val) if REP_SavedDB then REP_SavedDB.readyCheckDim = val end end)
+
+AddSettingsHeader(settingsFrame, "General Options", -430)
+local cbDisableInstanced = CreateSettingsCheckbox(settingsFrame, "Disable processing in instanced content", -452, function(val) if REP_SavedDB then REP_SavedDB.disableInstanced = val end end)
+
+local settingsButton = CreateFrame("Button", nil, vep_mainframe, "UIPanelButtonTemplate")
+settingsButton:SetSize(65, 20)
+settingsButton:SetPoint("LEFT", cleanUpButton, "RIGHT", 6, 0)
+settingsButton:SetText("Settings")
+AttachDelayedTooltip(settingsButton, "Configure addon settings.", vep_tooltip_delay)
+settingsButton:SetScript("OnClick", function()
+    if settingsFrame:IsShown() then
+        settingsFrame:Hide()
+    else
+        settingsFrame:Show()
+    end
+end)
+
+table_insert(vep_mainframe.innerElements, settingsButton)
+table_insert(vep_mainframe.innerElements, headerFrame)
+table_insert(vep_mainframe.innerElements, scrollFrame)
+table_insert(vep_mainframe.innerElements, resizeBackdrop)
+
+-------------------------------------------------------------------------------
+-- 4. Minimize Controller
+-------------------------------------------------------------------------------
+local isMinimized = false
+local savedWidth = VEP_CONFIG.DEFAULT_WIDTH
+local savedHeight = VEP_CONFIG.DEFAULT_HEIGHT
+
+local minimizeButton = CreateFrame("Button", nil, vep_mainframe, "UIPanelButtonTemplate")
+minimizeButton:SetSize(20, 20)
+
+local closeBtn = vep_mainframe.CloseButton or vep_mainframe.closeButton
+if closeBtn then
+    minimizeButton:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
+else
+    minimizeButton:SetPoint("TOPRIGHT", vep_mainframe, "TOPRIGHT", -26, -5)
+end
+
+minimizeButton:SetText("_")
+minimizeButton:SetScript("OnClick", function()
+    isMinimized = not isMinimized
+    confirmFrame:Hide()
+
+    if isMinimized then
+        savedWidth = vep_mainframe:GetWidth()
+        savedHeight = vep_mainframe:GetHeight()
+        
+        vep_mainframe:SetResizable(false)
+        vep_mainframe:SetSize(200, 28)
+
+        for _, el in ipairs(vep_mainframe.innerElements) do el:Hide() end
+
+        if vep_mainframe.Bg then vep_mainframe.Bg:Hide() end
+        if vep_mainframe.NineSlice then vep_mainframe.NineSlice:Hide() end
+        if vep_mainframe.Inset then vep_mainframe.Inset:Hide() end
+        if vep_mainframe.TopTileStreaks then vep_mainframe.TopTileStreaks:Hide() end
+
+        minimizeButton:SetText("+")
+    else
+        vep_mainframe:SetSize(savedWidth, savedHeight)
+        vep_mainframe:SetResizable(true)
+
+        for _, el in ipairs(vep_mainframe.innerElements) do el:Show() end
+
+        if vep_mainframe.Bg then vep_mainframe.Bg:Show() end
+        if vep_mainframe.NineSlice then vep_mainframe.NineSlice:Show() end
+        if vep_mainframe.Inset then vep_mainframe.Inset:Show() end
+        if vep_mainframe.TopTileStreaks then vep_mainframe.TopTileStreaks:Show() end
+
+        minimizeButton:SetText("_")
+        vep_mainframe:UpdateLayoutWidths()
+    end
+end)
+
+vep_mainframe:SetSize(VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT)
+vep_mainframe:Hide()
+
+-------------------------------------------------------------------------------
+-- 5. Dynamic Layout Manager & Row Processing
+-------------------------------------------------------------------------------
+vep_mainframe.rows = {}
+vep_mainframe.lastReadyCheckTime = 0
+
+function vep_mainframe:UpdateLayoutWidths()
+    if isMinimized then return end
+
+    local availableWidth = math_max(scrollFrame:GetWidth() - 5, 635)
+    local fixedWidths = VEP_CONFIG.COLUMNS[1].width + VEP_CONFIG.COLUMNS[2].width + VEP_CONFIG.COLUMNS[3].width + VEP_CONFIG.COLUMNS[4].width
+    local dynamicTextWidth = math_max(availableWidth - fixedWidths, 120)
+
+    VEP_CONFIG.COLUMNS[5].width = dynamicTextWidth
+    contentFrame:SetWidth(availableWidth)
+
+    local offsetX = 0
+    for i, col in ipairs(VEP_CONFIG.COLUMNS) do
+        if headerButtons[i] then
+            headerButtons[i]:SetWidth(col.width)
+            headerButtons[i]:SetPoint("LEFT", headerFrame, "LEFT", offsetX, 0)
+        end
+        offsetX = offsetX + col.width
+    end
+
+    if self.rows then
+        for _, row in ipairs(self.rows) do
+            row:SetWidth(availableWidth)
+            local rowHeight = 22
+            if row.cells then
+                local cellOffsetX = 0
+                for i, col in ipairs(VEP_CONFIG.COLUMNS) do
+                    if row.cells[i] then
+                        row.cells[i]:SetWidth(col.width - 10)
+                        row.cells[i]:SetPoint("TOPLEFT", row, "TOPLEFT", cellOffsetX + 6, -4)
+                        local textHeight = row.cells[i]:GetStringHeight() + 8
+                        if textHeight > rowHeight then rowHeight = textHeight end
+                    end
+                    cellOffsetX = cellOffsetX + col.width
+                end
+            end
+            row:SetHeight(rowHeight)
+        end
+        self:SortAndRefreshRows()
+    end
+end
+
+vep_mainframe:SetScript("OnSizeChanged", function(self)
+    vep_mainframe:UpdateLayoutWidths()
+end)
+
+vep_mainframe:SetScript("OnShow", function(self)
+    vep_mainframe:UpdateLayoutWidths()
+end)
+
+function vep_mainframe:ClearLog()
+    if self.rows then
+        for _, row in ipairs(self.rows) do
+            row:Hide()
+            row:SetParent(nil)
+        end
+    end
+    self.rows = {}
+    if REP_SavedDB then
+        REP_SavedDB.rows = {}
+    end
+    contentFrame:SetHeight(1)
+end
+
+function vep_mainframe:CleanUpLog()
+    if not self.rows then return end
+
+    local keptRows = {}
+    local keptSavedRows = {}
+    local hasReadyCheck = (self.lastReadyCheckTime and self.lastReadyCheckTime > 0)
+    
+    local deletePredates = REP_SavedDB and REP_SavedDB.cleanup and REP_SavedDB.cleanup.predates
+    local deleteDimmed = REP_SavedDB and REP_SavedDB.cleanup and REP_SavedDB.cleanup.dimmed
+
+    for _, row in ipairs(self.rows) do
+        local isDimmed = row.isDimmed
+        local predatesReadyCheck = hasReadyCheck and (row.timestamp and row.timestamp < self.lastReadyCheckTime)
+
+        local shouldDelete = false
+        if deletePredates and predatesReadyCheck then shouldDelete = true end
+        if deleteDimmed and isDimmed then shouldDelete = true end
+
+        if shouldDelete then
+            row:Hide()
+            row:SetParent(nil)
+        else
+            table_insert(keptRows, row)
+            if REP_SavedDB and REP_SavedDB.rows then
+                for _, savedData in ipairs(REP_SavedDB.rows) do
+                    if savedData.timestamp == row.timestamp then
+                        table_insert(keptSavedRows, savedData)
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    self.rows = keptRows
+    if REP_SavedDB then
+        REP_SavedDB.rows = keptSavedRows
+    end
+    vep_mainframe:SortAndRefreshRows()
+end
+
+function vep_mainframe:SortAndRefreshRows()
+    table_sort(self.rows, function(a, b)
+        local charA = (a.characterName or ""):lower()
+        local charB = (b.characterName or ""):lower()
+        if charA ~= charB then
+            return charA < charB
+        else
+            return (a.timeString or "") > (b.timeString or "")
+        end
+    end)
+
+    local currentOffsetY = 0
+    for index, row in ipairs(self.rows) do
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", 0, -currentOffsetY)
+        row.rowIndex = index
+        
+        if index % 2 == 0 then
+            row:SetBackdropColor(0.1, 0.1, 0.1, 0.4)
+        else
+            row:SetBackdropColor(0.2, 0.2, 0.2, 0.2)
+        end
+        currentOffsetY = currentOffsetY + row:GetHeight()
+    end
+    contentFrame:SetHeight(math_max(currentOffsetY, 1))
+end
+
+local function OnRowClick(row, button)
+    if button == "RightButton" then
+        local targetName = (row.avatarName ~= "" and row.avatarName) or row.characterName
+        if targetName and targetName ~= "" then
+            ChatFrame_OpenChat("/w " .. targetName .. " ")
+        end
+        return
+    end
+
+    local currentTime = GetTime()
+    if (currentTime - (row.lastClickTime or 0)) <= VEP_CONFIG.DOUBLE_CLICK_THRESHOLD then
+        row.isDimmed = not row.isDimmed
+        local targetAlpha = row.isDimmed and 0.5 or 1.0
+        for _, cell in ipairs(row.cells) do 
+            cell:SetAlpha(targetAlpha) 
+        end
+        
+        if REP_SavedDB and REP_SavedDB.rows then
+            for _, savedData in ipairs(REP_SavedDB.rows) do
+                if savedData.timestamp == row.timestamp then
+                    savedData.isDimmed = row.isDimmed
+                    break
+                end
+            end
+        end
+
+        row.lastClickTime = 0
+    else
+        row.lastClickTime = currentTime
+    end
+end
+
+function vep_mainframe:AddRow(timeString, characterName, avatarName, emoteResult, emoteText, isDimmed, timestamp)
+    local rowWidth = contentFrame:GetWidth()
+    local rowHeight = 22
+    
+    local row = CreateFrame("Button", nil, contentFrame, "BackdropTemplate")
+    row.characterName = characterName or ""
+    row.avatarName = avatarName or ""
+    row.timeString = timeString or ""
+    row.timestamp = timestamp or GetTime()
+    row.cells = {}
+    row.isDimmed = isDimmed or false
+    row.lastClickTime = 0
+
+    row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
+
+    local initialAlpha = row.isDimmed and 0.5 or 1.0
+
+    row:SetScript("OnEnter", function(self) self:SetBackdropColor(0.25, 0.35, 0.5, 0.6) end)
+    row:SetScript("OnLeave", function(self)
+        if (self.rowIndex or 1) % 2 == 0 then
+            self:SetBackdropColor(0.1, 0.1, 0.1, 0.4)
+        else
+            self:SetBackdropColor(0.2, 0.2, 0.2, 0.2)
+        end
+    end)
+
+    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    row:SetScript("OnClick", OnRowClick)
+
+    AttachDelayedTooltip(row, "Right click to whisper this character", vep_tooltip_delay)
+
+    local values = { timeString, characterName, avatarName, emoteResult, emoteText }
+    local currentOffsetX = 0
+
+    for i, col in ipairs(VEP_CONFIG.COLUMNS) do
+        local cell = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        cell:SetPoint("TOPLEFT", row, "TOPLEFT", currentOffsetX + 6, -4)
+        cell:SetWidth(col.width - 10)
+        cell:SetJustifyH("LEFT")
+        cell:SetWordWrap(col.wrap or false)
+        cell:SetAlpha(initialAlpha)
+
+        local rawValue = values[i] or ""
+        if C_ChatInfo and C_ChatInfo.ReplaceIconAndGroupExpressions then
+            rawValue = C_ChatInfo.ReplaceIconAndGroupExpressions(rawValue)
+        end
+        
+        cell:SetText(rawValue)
+        row.cells[i] = cell
+        
+        local textHeight = cell:GetStringHeight() + 8
+        if textHeight > rowHeight then rowHeight = textHeight end
+        currentOffsetX = currentOffsetX + col.width
+    end
+
+    row:SetSize(rowWidth, rowHeight)
+    table_insert(self.rows, row)
+
+    if not timestamp and REP_SavedDB and REP_SavedDB.rows then
+        table_insert(REP_SavedDB.rows, {
+            timeString = timeString,
+            characterName = characterName,
+            avatarName = avatarName,
+            emoteResult = emoteResult,
+            emoteText = emoteText,
+            isDimmed = row.isDimmed,
+            timestamp = row.timestamp
+        })
+    end
+
+    vep_mainframe:SortAndRefreshRows()
+end
+
+-------------------------------------------------------------------------------
+-- 6. Chat Parsing & Event Handler
+-------------------------------------------------------------------------------
+local function EvaluateMatchCriteria(cleanInner, rawMessage)
+    if rawMessage:find("[▼●◆▲★♦]") or rawMessage:find("{.-}") or rawMessage:find("|T.-|t") or rawMessage:find("|t") or rawMessage:lower():find("{%a+}") then
+        return true
+    end
+
+    if cleanInner ~= "" and cleanInner ~= "flavor" then
+        return true
+    end
+
+    if cleanInner:find("%d") then
+        return true
+    end
+
+    for _, keyword in ipairs(VEP_CONFIG.KEYWORDS) do
+        if cleanInner:find(keyword) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ResolveCharacterName(cleanSender, playerClean)
+    if not (C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("TotalRP3") and TRP3_API) then
+        return nil
+    end
+
+    if cleanSender == playerClean then
+        local unitID = TRP3_API.utils.str.getUnitID("player")
+        if unitID then
+            return TRP3_API.register.getUnitRPName("player") 
+                      or TRP3_API.chat.getFullnameForUnitUsingChatMethod(unitID)
+        end
+    else
+        local prefix = (IsInRaid() and "raid") or "party"
+        local numMembers = (IsInRaid() and GetNumGroupMembers()) or GetNumSubgroupMembers()
+        for i = 1, numMembers do
+            local unit = prefix .. i
+            local uName, uRealm = UnitName(unit)
+            if uName then
+                local fullUnitName = (uRealm and uRealm ~= "") and (uName .. "-" .. uRealm) or uName
+                if Ambiguate(fullUnitName, "none") == cleanSender then
+                    local unitID = TRP3_API.utils.str.getUnitID(unit)
+                    if unitID then
+                        return TRP3_API.register.getUnitRPName(unit) 
+                                  or TRP3_API.chat.getFullnameForUnitUsingChatMethod(unitID)
+                    end
+                    break
+                end
+            end
+        end
+        
+        if TRP3_API.chat and TRP3_API.chat.getFullnameForUnitUsingChatMethod then
+            return TRP3_API.chat.getFullnameForUnitUsingChatMethod(cleanSender)
+        end
+    end
+    return nil
+end
+
+local chatFrame = CreateFrame("Frame")
+local authorBuffers = {}
+local BUFFER_WINDOW = 2.5
+
+local function FlushAuthorBuffer(cleanSender)
+    local buf = authorBuffers[cleanSender]
+    if not buf then return end
+    authorBuffers[cleanSender] = nil
+
+    if not buf.hasValidMatch then return end
+
+    local vep_action_result = table.concat(buf.results, " ")
+    local vep_action_emote = table.concat(buf.texts, " ")
+
+    vep_mainframe:AddRow(buf.timeString, buf.characterName, buf.avatarName, vep_action_result, vep_action_emote)
+end
+
+local function OnChatMessage(self, event, message, sender, ...)
+    if event == "ADDON_LOADED" and message == addonName then
+        REP_SavedDB = REP_SavedDB or { 
+            rows = {}, 
+            lastReadyCheckTime = 0, 
+            isVisible = true,
+            readyCheckDim = false,
+            disableInstanced = false,
+            channels = { say = true, party = true, raid = true, emote = true, instance = true },
+            modes = { ungrouped = true, party = true, raid = true },
+            cleanup = { predates = true, dimmed = true }
+        }
+        
+        if REP_SavedDB.isVisible == nil then REP_SavedDB.isVisible = true end
+        if REP_SavedDB.readyCheckDim == nil then REP_SavedDB.readyCheckDim = false end
+        if REP_SavedDB.disableInstanced == nil then REP_SavedDB.disableInstanced = false end
+        REP_SavedDB.channels = REP_SavedDB.channels or { say = true, party = true, raid = true, emote = true, instance = true }
+        REP_SavedDB.modes = REP_SavedDB.modes or { ungrouped = true, party = true, raid = true }
+        REP_SavedDB.cleanup = REP_SavedDB.cleanup or { predates = true, dimmed = true }
+
+        cbSay:SetChecked(REP_SavedDB.channels.say)
+        cbParty:SetChecked(REP_SavedDB.channels.party)
+        cbRaid:SetChecked(REP_SavedDB.channels.raid)
+        cbEmote:SetChecked(REP_SavedDB.channels.emote)
+        cbInstance:SetChecked(REP_SavedDB.channels.instance)
+        cbModeUngrouped:SetChecked(REP_SavedDB.modes.ungrouped)
+        cbModeParty:SetChecked(REP_SavedDB.modes.party)
+        cbModeRaid:SetChecked(REP_SavedDB.modes.raid)
+        cbCleanPredates:SetChecked(REP_SavedDB.cleanup.predates)
+        cbCleanDimmed:SetChecked(REP_SavedDB.cleanup.dimmed)
+        cbReadyDim:SetChecked(REP_SavedDB.readyCheckDim)
+        cbDisableInstanced:SetChecked(REP_SavedDB.disableInstanced)
+
+        vep_mainframe.lastReadyCheckTime = REP_SavedDB.lastReadyCheckTime or 0
+        
+        if REP_SavedDB.isVisible then
+            vep_mainframe:Show()
+        else
+            vep_mainframe:Hide()
+        end
+        
+        if REP_SavedDB.rows then
+            local savedEntries = REP_SavedDB.rows
+            REP_SavedDB.rows = {}
+            for _, entry in ipairs(savedEntries) do
+                vep_mainframe:AddRow(entry.timeString, entry.characterName, entry.avatarName, entry.emoteResult, entry.emoteText, entry.isDimmed, entry.timestamp)
+            end
+        end
+        return
+    end
+
+    if event == "READY_CHECK" then
+        vep_mainframe.lastReadyCheckTime = GetTime()
+        if REP_SavedDB then
+            REP_SavedDB.lastReadyCheckTime = vep_mainframe.lastReadyCheckTime
+            
+            if REP_SavedDB.readyCheckDim and vep_mainframe.rows then
+                for _, row in ipairs(vep_mainframe.rows) do
+                    row.isDimmed = true
+                    for _, cell in ipairs(row.cells) do cell:SetAlpha(0.5) end
+                    for _, savedData in ipairs(REP_SavedDB.rows or {}) do
+                        if savedData.timestamp == row.timestamp then
+                            savedData.isDimmed = true
+                        end
+                    end
+                end
+            end
+        end
+        return
+    end
+
+    if type(sender) ~= "string" or sender == "" then 
+        return 
+    end
+
+    -- Check if instanced processing is disabled
+    if REP_SavedDB and REP_SavedDB.disableInstanced then
+        local inInstance, instanceType = IsInInstance()
+        if inInstance and (instanceType == "party" or instanceType == "raid" or instanceType == "scenario") then
+            return
+        end
+    end
+
+    local isSay = (event == "CHAT_MSG_SAY")
+    local isParty = (event == "CHAT_MSG_PARTY" or event == "CHAT_MSG_PARTY_LEADER")
+    local isRaid = (event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER" or event == "CHAT_MSG_RAID_WARNING")
+    local isEmote = (event == "CHAT_MSG_EMOTE")
+    local isInstance = (event == "CHAT_MSG_INSTANCE_CHAT" or event == "CHAT_MSG_INSTANCE_CHAT_LEADER")
+
+    local chConfig = REP_SavedDB and REP_SavedDB.channels
+    if chConfig then
+        if isSay and not chConfig.say then return end
+        if isParty and not chConfig.party then return end
+        if isRaid and not chConfig.raid then return end
+        if isEmote and not chConfig.emote then return end
+        if isInstance and not chConfig.instance then return end
+    end
+
+    local inGroup = IsInGroup()
+    local inRaid = IsInRaid()
+    local modes = REP_SavedDB and REP_SavedDB.modes
+
+    if not inGroup and modes and not modes.ungrouped then return end
+    if inGroup and not inRaid and modes and not modes.party then return end
+    if inRaid and modes and not modes.raid then return end
+
+    local cleanSender = Ambiguate(sender, "none")
+    local playerClean = Ambiguate(UnitName("player"), "none")
+
+    local pattern = "([%(%[][^%]%)]-[%]%)])"
+    local removePattern = "[%(%[][^%]%)]-[%]%)]"
+
+    local results = {}
+    local hasMatchInThisLine = false
+
+    if message:find("[▼●◆▲★♦]") or message:find("{.-}") or message:find("|T.-|t") or message:find("|t") then
+        hasMatchInThisLine = true
+    end
+
+    for match in message:gmatch(pattern) do
+        local cleanInner = trim(match:sub(2, -2)):lower()
+        if cleanInner ~= "" and cleanInner ~= "flavor" then
+            table_insert(results, match)
+            if EvaluateMatchCriteria(cleanInner, message) then
+                hasMatchInThisLine = true
+            end
+        end
+    end
+
+    local vep_action_emote = trim(message:gsub(removePattern, ""))
+
+    if event == "CHAT_MSG_EMOTE" then
+        vep_action_emote = trim(vep_action_emote:gsub("^" .. cleanSender .. "%s*", ""))
+    end
+
+    local avatarName = cleanSender
+    local characterName = ResolveCharacterName(cleanSender, playerClean) or cleanSender
+    local timeString = date("%H:%M:%S")
+
+    if authorBuffers[cleanSender] then
+        local buf = authorBuffers[cleanSender]
+        
+        if buf.timer then
+            buf.timer:Cancel()
+        end
+        
+        for _, r in ipairs(results) do
+            table_insert(buf.results, r)
+        end
+        if vep_action_emote ~= "" then
+            table_insert(buf.texts, vep_action_emote)
+        end
+        
+        if hasMatchInThisLine then
+            buf.hasValidMatch = true
+        end
+        
+        buf.characterName = characterName
+        
+        buf.timer = C_Timer.NewTimer(BUFFER_WINDOW, function()
+            FlushAuthorBuffer(cleanSender)
+        end)
+    else
+        local texts = {}
+        if vep_action_emote ~= "" then
+            table_insert(texts, vep_action_emote)
+        end
+        
+        local timer = C_Timer.NewTimer(BUFFER_WINDOW, function()
+            FlushAuthorBuffer(cleanSender)
+        end)
+
+        authorBuffers[cleanSender] = {
+            timeString = timeString,
+            characterName = characterName,
+            avatarName = avatarName,
+            results = results,
+            texts = texts,
+            hasValidMatch = hasMatchInThisLine,
+            timer = timer
+        }
+    end
+end
+
+for _, eventName in ipairs(VEP_CONFIG.EVENTS) do
+    chatFrame:RegisterEvent(eventName)
+end
+chatFrame:SetScript("OnEvent", OnChatMessage)
+
+-------------------------------------------------------------------------------
+-- 7. Slash Command Integration
+-------------------------------------------------------------------------------
+SLASH_ROLEPLAYEVENTPARSER1 = "/reparse"
+
+SlashCmdList["ROLEPLAYEVENTPARSER"] = function()
+    if vep_mainframe:IsShown() then
+        vep_mainframe:Hide()
+        if REP_SavedDB then
+            REP_SavedDB.isVisible = false
+        end
+    else
+        vep_mainframe:Show()
+        if REP_SavedDB then
+            REP_SavedDB.isVisible = true
+        end
+    end
+end
