@@ -21,4 +21,4 @@ jobs:
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
         with:
-          args: -c 1686104 # Replace 123456 with your numeric CurseForge Project ID
+          args: -c 1686104 -r release
