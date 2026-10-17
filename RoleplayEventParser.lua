@@ -93,9 +93,9 @@ else
 end
 
 local addonVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version") or GetAddOnMetadata(addonName, "Version")
-local baseTitleText = "Emote Log Viewer"
+local baseTitleText = ""
 if addonVersion and addonVersion ~= "" then
-    baseTitleText = baseTitleText .. " v" .. addonVersion
+    baseTitleText = baseTitleText..addonVersion
 end
 vep_mainframe.title:SetText(baseTitleText)
 
@@ -946,7 +946,7 @@ chatFrame:SetScript("OnEvent", OnChatMessage)
 -------------------------------------------------------------------------------
 -- 7. Slash Command Integration
 -------------------------------------------------------------------------------
-SLASH_ROLEPLAYEVENTPARSER1 = "/reparse"
+SLASH_ROLEPLAYEVENTPARSER1 = "/rp-parse"
 
 SlashCmdList["ROLEPLAYEVENTPARSER"] = function()
     if vep_mainframe:IsShown() then
