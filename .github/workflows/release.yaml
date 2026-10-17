@@ -1,0 +1,24 @@
+name: Package and Release Addon
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers whenever you push a tag starting with 'v' (e.g., v1.0.0)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Step A: Checkout your code with full Git tag history
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # IMPORTANT: Required so the packager can read Git tags accurately
+
+      # Step B: Run BigWigs Packager
+      - name: Run BigWigs Packager
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+        with:
+          args: -c 1686104 # Replace 123456 with your numeric CurseForge Project ID
