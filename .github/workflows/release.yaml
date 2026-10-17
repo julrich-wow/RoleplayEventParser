@@ -21,4 +21,4 @@ jobs:
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
         with:
-          args: -c 1686104 -r release
+          args: -c 1686104 -p "RoleplayEventParser {project-version}"
