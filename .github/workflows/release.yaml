@@ -16,16 +16,15 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # Step A: Checkout your code with full Git tag history
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # IMPORTANT: Required so the packager can read Git tags accurately
+          fetch-depth: 0 # Fetches full history so tag versions register
 
-      # Step B: Run BigWigs Packager
       - name: Run BigWigs Packager
         uses: BigWigsMods/packager@v2
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: -c 1686104 -n "RoleplayEventParser {project-version}" -p "RoleplayEventParser {project-version}"
+          args: -c 1686104 -n "RoleplayEventParser {project-version}" -p "RoleplayEventParser {project-version}" -r release
