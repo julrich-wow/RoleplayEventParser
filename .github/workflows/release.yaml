@@ -14,18 +14,18 @@ jobs:
 
       - name: Package Addon
         run: |
-          # Create the exact folder name expected inside the zip
+          # Create the folder structure expected inside the zip
           mkdir -p RoleplayEventParser
           
-          # Copy your addon files into the folder
+          # Copy addon files
           cp RoleplayEventParser.lua RoleplayEventParser/
           cp RoleplayEventParser.toc RoleplayEventParser/
           cp CHANGELOG.md RoleplayEventParser/
           
-          # Create the distribution zip containing the folder
+          # Create zip archive
           zip -r RoleplayEventParser-${{ github.ref_name }}.zip RoleplayEventParser/
           
-          # Verify contents of the zip locally in the log for debugging
+          # Verify structure in workflow output
           unzip -l RoleplayEventParser-${{ github.ref_name }}.zip
 
       - name: Upload to CurseForge
@@ -33,12 +33,9 @@ jobs:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
         run: |
           VERSION=${{ github.ref_name }}
-          # Strip the leading 'v' if your versioning prefers clean numbers, or keep it
-          CLEAN_VERSION=${VERSION#v}
-          
-          echo "Uploading version $CLEAN_VERSION to CurseForge..."
+          echo "Uploading version $VERSION to CurseForge..."
           
           curl -X POST https://downloads.curseforge.com/api/projects/1686104/upload-file \
             -H "X-Api-Token: $CF_API_KEY" \
             -F "file=@RoleplayEventParser-$VERSION.zip" \
-            -F "metadata={\"releaseType\":\"release\",\"changelog\":\"Check CHANGELOG.md\",\"changelogType\":\"markdown\",\"gameVersions\":[120105]}"
+            -F "metadata={\"releaseType\":\"release\",\"changelog\":\"Check CHANGELOG.md for changes.\",\"changelogType\":\"markdown\"}"
