@@ -10,21 +10,27 @@ name: Package and Release Addon
 on:
   push:
     tags:
-      - 'v*' # Triggers whenever you push a tag starting with 'v' (e.g., v1.0.0)
+      - '**' # Triggers on any tag push
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Step A: Checkout full git tag history
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetches full history so tag versions register
+          fetch-depth: 0
 
+      # Step B: Run BigWigs Packager with valid flag arguments
       - name: Run BigWigs Packager
         uses: BigWigsMods/packager@v2
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: -c 1686104 -n "RoleplayEventParser {project-version}" -p "RoleplayEventParser {project-version}" -r release
+          # -c <CurseForge_Project_ID>
+          # -r release (forces Release status)
+          # -n "{file_template}:{label_template}"
+          args: -c 1686104 -r release -n "RoleplayEventParser-{project-version}:RoleplayEventParser {project-version}"
