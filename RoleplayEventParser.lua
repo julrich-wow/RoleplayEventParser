@@ -137,6 +137,19 @@ local addonVersion = C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddO
 local baseTitleText = addonVersion or ""
 vep_mainframe.title:SetText(baseTitleText)
 
+-- Dynamic Visibility Tracking Hooks
+vep_mainframe:HookScript("OnShow", function()
+    if REP_SavedDB then
+        REP_SavedDB.isVisible = true
+    end
+end)
+
+vep_mainframe:HookScript("OnHide", function()
+    if REP_SavedDB then
+        REP_SavedDB.isVisible = false
+    end
+end)
+
 -- Confirmation Dialog
 local confirmFrame = CreateFrame("Frame", nil, vep_mainframe, "BasicFrameTemplateWithInset")
 confirmFrame:SetSize(300, 110)
@@ -313,6 +326,14 @@ else
     settingsFrame.title:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 10, -6)
 end
 settingsFrame.title:SetText(baseTitleText .. " - Settings")
+
+settingsFrame:HookScript("OnShow", function()
+    if REP_SavedDB then REP_SavedDB.isSettingsVisible = true end
+end)
+
+settingsFrame:HookScript("OnHide", function()
+    if REP_SavedDB then REP_SavedDB.isSettingsVisible = false end
+end)
 
 local function CreateSettingsCheckbox(parent, labelText, xOffset, yOffset, targetTable, targetKey)
     local cb = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
@@ -570,7 +591,6 @@ function vep_mainframe:UpdateLayoutWidths()
 end
 
 vep_mainframe:SetScript("OnSizeChanged", function(self) vep_mainframe:UpdateLayoutWidths() end)
-vep_mainframe:SetScript("OnShow", function(self) vep_mainframe:UpdateLayoutWidths() end)
 
 function vep_mainframe:ClearLog()
     if self.rows then
@@ -871,6 +891,7 @@ local function OnChatMessage(self, event, message, sender, ...)
             rows = {}, 
             lastReadyCheckTime = 0, 
             isVisible = true,
+            isSettingsVisible = false,
             isMinimized = false,
             savedWidth = VEP_CONFIG.DEFAULT_WIDTH,
             savedHeight = VEP_CONFIG.DEFAULT_HEIGHT,
@@ -886,6 +907,7 @@ local function OnChatMessage(self, event, message, sender, ...)
         }
         
         if REP_SavedDB.isVisible == nil then REP_SavedDB.isVisible = true end
+        if REP_SavedDB.isSettingsVisible == nil then REP_SavedDB.isSettingsVisible = false end
         if REP_SavedDB.isMinimized == nil then REP_SavedDB.isMinimized = false end
         if REP_SavedDB.readyCheckDim == nil then REP_SavedDB.readyCheckDim = false end
         if REP_SavedDB.disableInstanced == nil then REP_SavedDB.disableInstanced = false end
@@ -922,6 +944,12 @@ local function OnChatMessage(self, event, message, sender, ...)
             vep_mainframe:Show()
         else
             vep_mainframe:Hide()
+        end
+
+        if REP_SavedDB.isSettingsVisible then
+            settingsFrame:Show()
+        else
+            settingsFrame:Hide()
         end
         
         if REP_SavedDB.rows then
@@ -1072,8 +1100,7 @@ chatFrame:SetScript("OnEvent", OnChatMessage)
 -------------------------------------------------------------------------------
 -- 8. Slash Command Integration
 -------------------------------------------------------------------------------
-SLASH_ROLEPLAYEVENTPARSER1 = "/reparse"
-SLASH_ROLEPLAYEVENTPARSER2 = "/rp-parse"
+SLASH_ROLEPLAYEVENTPARSER1 = "/rp-parse"
 
 local function HandleSlashCommand(msg)
     local command = trim(msg:lower())
@@ -1095,10 +1122,8 @@ local function HandleSlashCommand(msg)
     else
         if vep_mainframe:IsShown() then
             vep_mainframe:Hide()
-            if REP_SavedDB then REP_SavedDB.isVisible = false end
         else
             vep_mainframe:Show()
-            if REP_SavedDB then REP_SavedDB.isVisible = true end
         end
     end
 end

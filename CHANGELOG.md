@@ -1,4 +1,4 @@
-## Release 1.0.9
+## Release 1.0.18
 - Added new matching options in settings: match raid markers, match digits, and match my name. Mouse over them to see a tooltip explaining each one.
 - Reformatted the Settings window.
 - Fixed a bug with how the minimized window is saved on /reload or logout.
