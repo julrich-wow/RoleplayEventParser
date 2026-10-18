@@ -33,4 +33,4 @@ jobs:
           # -c <CurseForge_Project_ID>
           # -r release (forces Release status)
           # -n "{file_template}:{label_template}"
-          args: -c 1686104 -r release -n "RoleplayEventParser-{project-version}:RoleplayEventParser {project-version}"
+          args: -c 1686104 -r release
