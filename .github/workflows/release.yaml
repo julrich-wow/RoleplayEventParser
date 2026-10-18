@@ -35,7 +35,17 @@ jobs:
           VERSION=${{ github.ref_name }}
           echo "Uploading version $VERSION to CurseForge..."
           
+          # Read CHANGELOG.md content into a variable
+          CHANGELOG_CONTENT=$(cat CHANGELOG.md)
+          
+          # Use jq to securely build the JSON payload with the changelog text
+          PAYLOAD=$(jq -n \
+            --arg rel "release" \
+            --arg changelog "$CHANGELOG_CONTENT" \
+            '{releaseType: $rel, changelog: $changelog, changelogType: "markdown"}')
+          
+          # Send the request to CurseForge
           curl -X POST https://downloads.curseforge.com/api/projects/1686104/upload-file \
             -H "X-Api-Token: $CF_API_KEY" \
             -F "file=@RoleplayEventParser-$VERSION.zip" \
-            -F "metadata={\"releaseType\":\"release\",\"changelog\":\"Check CHANGELOG.md for changes.\",\"changelogType\":\"markdown\"}"
+            -F "metadata=$PAYLOAD"
