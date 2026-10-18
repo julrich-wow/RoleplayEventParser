@@ -3,6 +3,7 @@
 ## Notes: An addon to make it easier for GMs to parse player emotes during roleplay events.
 ## Author: vaminion
 ## Interface: 120105
+## X-Curse-Project-ID: 1686104
 ## SavedVariables: REP_SavedDB
 
 # Load the functions
