@@ -1,9 +1,10 @@
 # Commands to push updates:
 # Open the terminal in VSCode.
-# Run these two commands:
-# git tag v1.0.X
-# git push origin v1.0.X
-# Increment X for new releases.
+# Run these commands:
+# git add .
+# git commit -m "Release v1.0.10"
+# git tag v1.0.10
+# git push origin master --tags
 
 name: Package and Release Addon
 
