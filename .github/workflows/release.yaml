@@ -6,30 +6,43 @@
 # git tag v1.0.10
 # git push origin master --tags
 
-name: Package and Release Addon
+name: Release to CurseForge
 
 on:
   push:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
-  release:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run BigWigs Packager
-        uses: BigWigsMods/packager@v2
-        env:
-          CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Clean Addon Directory
+        run: |
+          mkdir -p build/RoleplayEventParser
+          cp RoleplayEventParser.lua build/RoleplayEventParser/
+          cp RoleplayEventParser.toc build/RoleplayEventParser/
+          cp CHANGELOG.md build/RoleplayEventParser/
+
+      - name: Zip Addon Directory
+        run: |
+          cd build
+          zip -r ../RoleplayEventParser-${{ github.ref_name }}.zip RoleplayEventParser/
+          cd ..
+
+      - name: Upload to CurseForge
+        uses: curseforge/action-publish-release@v2
         with:
-          args: -c 1686104 -r release
+          api-token: ${{ secrets.CF_API_KEY }}
+          game-id: 1 # World of Warcraft
+          project-id: '1686104'
+          changelog: 'Check CHANGELOG.md for details.'
+          changelog-type: 'markdown'
+          release-type: 'release'
+          files: |
+            RoleplayEventParser-${{ github.ref_name }}.zip
