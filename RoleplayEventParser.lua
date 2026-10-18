@@ -67,6 +67,13 @@ local function EscapePattern(s)
     return s:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
 end
 
+local function ExtractFirstName(fullName)
+    if not fullName or fullName == "" then return nil end
+    local clean = fullName:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")
+    clean = trim(clean)
+    return clean:match("^(%S+)")
+end
+
 local function AttachDelayedTooltip(button, tooltipText, delay)
     button:SetScript("OnEnter", function(self)
         if self.tooltipTimer then self.tooltipTimer:Cancel() end
@@ -216,7 +223,7 @@ cleanUpButton:SetScript("OnClick", function(self)
         self.lastClickTime = 0
     else
         self.lastClickTime = currentTime
-        ShowConfirmDialog("Clean up log entries?", function() vep_mainframe:CleanUpLog() end)
+        ShowConfirmDialog("Clean up log entries according to rules?", function() vep_mainframe:CleanUpLog() end)
     end
 end)
 
@@ -282,10 +289,10 @@ end)
 resizeButton:SetScript("OnMouseUp", function() vep_mainframe:StopMovingOrSizing() end)
 
 -------------------------------------------------------------------------------
--- 4. Settings Window Integration
+-- 4. Compact Settings Window Integration
 -------------------------------------------------------------------------------
 local settingsFrame = CreateFrame("Frame", "RoleplayEventParserSettingsFrame", UIParent, "BasicFrameTemplateWithInset")
-settingsFrame:SetSize(420, 550)
+settingsFrame:SetSize(410, 420)
 settingsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 settingsFrame:SetMovable(true)
 settingsFrame:EnableMouse(true)
@@ -307,9 +314,9 @@ else
 end
 settingsFrame.title:SetText(baseTitleText .. " - Settings")
 
-local function CreateSettingsCheckbox(parent, labelText, yOffset, targetTable, targetKey)
+local function CreateSettingsCheckbox(parent, labelText, xOffset, yOffset, targetTable, targetKey)
     local cb = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
-    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", xOffset, yOffset)
     cb.text = cb.Text or _G[cb:GetName() .. "Text"]
     if cb.text then
         cb.text:SetText(labelText)
@@ -328,40 +335,51 @@ local function CreateSettingsCheckbox(parent, labelText, yOffset, targetTable, t
     return cb
 end
 
-local function AddSettingsHeader(parent, text, yOffset)
+local function AddSettingsHeader(parent, text, xOffset, yOffset)
     local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, yOffset)
+    header:SetPoint("TOPLEFT", parent, "TOPLEFT", xOffset, yOffset)
     header:SetText(text)
     return header
 end
 
-AddSettingsHeader(settingsFrame, "Channels to Capture", -38)
-local cbSay = CreateSettingsCheckbox(settingsFrame, "Say (/say)", -60, "channels", "say")
-local cbParty = CreateSettingsCheckbox(settingsFrame, "Party (/party)", -85, "channels", "party")
-local cbRaid = CreateSettingsCheckbox(settingsFrame, "Raid / Raid Warning", -110, "channels", "raid")
-local cbEmote = CreateSettingsCheckbox(settingsFrame, "Emote (/emote)", -135, "channels", "emote")
-local cbInstance = CreateSettingsCheckbox(settingsFrame, "Instance Chat", -160, "channels", "instance")
+-- Two-Column Section: Channels (Col 1) & Group Modes (Col 2)
+AddSettingsHeader(settingsFrame, "Channels to Capture", 16, -36)
+local cbSay = CreateSettingsCheckbox(settingsFrame, "Say (/say)", 18, -54, "channels", "say")
+local cbParty = CreateSettingsCheckbox(settingsFrame, "Party (/party)", 18, -74, "channels", "party")
+local cbRaid = CreateSettingsCheckbox(settingsFrame, "Raid / Raid Warning", 18, -94, "channels", "raid")
+local cbEmote = CreateSettingsCheckbox(settingsFrame, "Emote (/emote)", 18, -114, "channels", "emote")
+local cbInstance = CreateSettingsCheckbox(settingsFrame, "Instance Chat", 18, -134, "channels", "instance")
 
-AddSettingsHeader(settingsFrame, "Parse Text When", -190)
-local cbModeUngrouped = CreateSettingsCheckbox(settingsFrame, "Ungrouped", -212, "modes", "ungrouped")
-local cbModeParty = CreateSettingsCheckbox(settingsFrame, "In a party", -237, "modes", "party")
-local cbModeRaid = CreateSettingsCheckbox(settingsFrame, "In a raid", -262, "modes", "raid")
+AddSettingsHeader(settingsFrame, "Parse Text When", 215, -36)
+local cbModeUngrouped = CreateSettingsCheckbox(settingsFrame, "Ungrouped", 217, -54, "modes", "ungrouped")
+local cbModeParty = CreateSettingsCheckbox(settingsFrame, "In a party", 217, -74, "modes", "party")
+local cbModeRaid = CreateSettingsCheckbox(settingsFrame, "In a raid", 217, -94, "modes", "raid")
 
-AddSettingsHeader(settingsFrame, "Clean Up Button Behavior", -295)
-local cbCleanPredates = CreateSettingsCheckbox(settingsFrame, "Delete entries predating last ready check", -317, "cleanup", "predates")
-local cbCleanDimmed = CreateSettingsCheckbox(settingsFrame, "Delete dimmed entries", -342, "cleanup", "dimmed")
+-- General & Clean Up Sections
+AddSettingsHeader(settingsFrame, "General Options & Matching Rules", 16, -164)
+local cbMatchRaidMarkers = CreateSettingsCheckbox(settingsFrame, "Match raid markers", 18, -182, nil, "matchRaidMarkers")
+AttachDelayedTooltip(cbMatchRaidMarkers, "Match events where the emote result includes a raid marker", VEP_CONFIG.TOOLTIP_DELAY)
 
-AddSettingsHeader(settingsFrame, "Ready Check Behavior", -375)
-local cbReadyDim = CreateSettingsCheckbox(settingsFrame, "Dim old rows when a ready check is detected", -397, nil, "readyCheckDim")
+local cbMatchDigits = CreateSettingsCheckbox(settingsFrame, "Match digits", 217, -182, nil, "matchDigits")
+AttachDelayedTooltip(cbMatchDigits, "Match events where the emote result includes a digit", VEP_CONFIG.TOOLTIP_DELAY)
 
-AddSettingsHeader(settingsFrame, "General Options", -430)
-local cbDisableInstanced = CreateSettingsCheckbox(settingsFrame, "Disable processing in instanced content", -452, nil, "disableInstanced")
+local cbMatchMyName = CreateSettingsCheckbox(settingsFrame, "Match my name", 18, -202, nil, "matchMyName")
+AttachDelayedTooltip(cbMatchMyName, "Match events that include your avatar or TRP3 name.", VEP_CONFIG.TOOLTIP_DELAY)
 
-AddSettingsHeader(settingsFrame, "Keywords", -485)
+local cbDisableInstanced = CreateSettingsCheckbox(settingsFrame, "Disable in instanced content", 217, -202, nil, "disableInstanced")
+AttachDelayedTooltip(cbDisableInstanced, "Disable matching in instances.", VEP_CONFIG.TOOLTIP_DELAY)
+
+AddSettingsHeader(settingsFrame, "Log Clean Up Behavior", 16, -230)
+local cbCleanPredates = CreateSettingsCheckbox(settingsFrame, "Delete entries before last ready check", 18, -248, "cleanup", "predates")
+local cbCleanDimmed = CreateSettingsCheckbox(settingsFrame, "Delete dimmed log entries", 18, -268, "cleanup", "dimmed")
+local cbReadyDim = CreateSettingsCheckbox(settingsFrame, "Auto-dim old entries on ready check", 18, -288, nil, "readyCheckDim")
+
+-- Keywords Direct Config
+AddSettingsHeader(settingsFrame, "Keywords", 16, -318)
 
 local keywordsEditBox = CreateFrame("EditBox", nil, settingsFrame, "InputBoxTemplate")
-keywordsEditBox:SetSize(270, 20)
-keywordsEditBox:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 20, -510)
+keywordsEditBox:SetSize(255, 20)
+keywordsEditBox:SetPoint("TOPLEFT", settingsFrame, "TOPLEFT", 22, -338)
 keywordsEditBox:SetAutoFocus(false)
 keywordsEditBox:SetScript("OnTextChanged", function(self, userInput)
     if userInput and REP_SavedDB then
@@ -372,7 +390,7 @@ keywordsEditBox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end
 keywordsEditBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
 local resetKeywordsBtn = CreateFrame("Button", nil, settingsFrame, "UIPanelButtonTemplate")
-resetKeywordsBtn:SetSize(100, 20)
+resetKeywordsBtn:SetSize(105, 20)
 resetKeywordsBtn:SetPoint("LEFT", keywordsEditBox, "RIGHT", 10, 0)
 resetKeywordsBtn:SetText("Reset Keywords")
 AttachDelayedTooltip(resetKeywordsBtn, "Reset keywords list to defaults.")
@@ -421,14 +439,24 @@ else
 end
 
 minimizeButton:SetText("_")
-minimizeButton:SetScript("OnClick", function()
-    isMinimized = not isMinimized
+
+local function ApplyMinimizedState(minimized)
+    isMinimized = minimized
     confirmFrame:Hide()
 
     if isMinimized then
-        savedWidth = vep_mainframe:GetWidth()
-        savedHeight = vep_mainframe:GetHeight()
-        
+        if not REP_SavedDB.savedWidth or REP_SavedDB.savedWidth < VEP_CONFIG.MIN_WIDTH then
+            savedWidth = vep_mainframe:GetWidth()
+            savedHeight = vep_mainframe:GetHeight()
+            if REP_SavedDB then
+                REP_SavedDB.savedWidth = savedWidth
+                REP_SavedDB.savedHeight = savedHeight
+            end
+        else
+            savedWidth = REP_SavedDB.savedWidth
+            savedHeight = REP_SavedDB.savedHeight
+        end
+
         vep_mainframe:SetResizable(false)
         vep_mainframe:SetSize(200, 28)
 
@@ -441,7 +469,10 @@ minimizeButton:SetScript("OnClick", function()
 
         minimizeButton:SetText("+")
     else
-        vep_mainframe:SetSize(savedWidth, savedHeight)
+        local targetWidth = (REP_SavedDB and REP_SavedDB.savedWidth) or savedWidth or VEP_CONFIG.DEFAULT_WIDTH
+        local targetHeight = (REP_SavedDB and REP_SavedDB.savedHeight) or savedHeight or VEP_CONFIG.DEFAULT_HEIGHT
+
+        vep_mainframe:SetSize(targetWidth, targetHeight)
         vep_mainframe:SetResizable(true)
 
         for _, el in ipairs(vep_mainframe.innerElements) do el:Show() end
@@ -454,6 +485,14 @@ minimizeButton:SetScript("OnClick", function()
         minimizeButton:SetText("_")
         vep_mainframe:UpdateLayoutWidths()
     end
+
+    if REP_SavedDB then
+        REP_SavedDB.isMinimized = isMinimized
+    end
+end
+
+minimizeButton:SetScript("OnClick", function()
+    ApplyMinimizedState(not isMinimized)
 end)
 
 vep_mainframe:SetSize(VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT)
@@ -729,15 +768,40 @@ end
 -------------------------------------------------------------------------------
 -- 7. Chat Parsing & Event Handler
 -------------------------------------------------------------------------------
+local function ResolvePlayerNames()
+    local blizzName = UnitName("player")
+    local trpName = nil
+    local trpFirstName = nil
+
+    if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("TotalRP3") and TRP3_API then
+        local unitID = TRP3_API.utils.str.getUnitID("player")
+        if unitID then
+            trpName = TRP3_API.register.getUnitRPName("player") or TRP3_API.chat.getFullnameForUnitUsingChatMethod(unitID)
+            if trpName then
+                trpFirstName = ExtractFirstName(trpName)
+            end
+        end
+    end
+
+    return blizzName, trpName, trpFirstName
+end
+
 local function EvaluateMatchCriteria(cleanInner, rawMessage)
-    if rawMessage:find("[▼●◆▲★♦]") or rawMessage:find("{.-}") or rawMessage:find("|T.-|t") or rawMessage:find("|t") or rawMessage:lower():find("{%a+}") then
-        return true
+    -- 1. Check Raid Markers
+    if REP_SavedDB and REP_SavedDB.matchRaidMarkers then
+        if rawMessage:find("[▼●◆▲★♦]") or rawMessage:find("{.-}") or rawMessage:find("|T.-|t") or rawMessage:find("|t") or rawMessage:lower():find("{%a+}") then
+            return true
+        end
     end
 
-    if cleanInner:find("%d") then
-        return true
+    -- 2. Check Digits
+    if REP_SavedDB and REP_SavedDB.matchDigits then
+        if cleanInner:find("%d") then
+            return true
+        end
     end
 
+    -- 3. Check Configured Keywords
     local activeKeywords = GetActiveKeywords()
     for _, keyword in ipairs(activeKeywords) do
         if cleanInner:find(EscapePattern(keyword)) then
@@ -807,8 +871,14 @@ local function OnChatMessage(self, event, message, sender, ...)
             rows = {}, 
             lastReadyCheckTime = 0, 
             isVisible = true,
+            isMinimized = false,
+            savedWidth = VEP_CONFIG.DEFAULT_WIDTH,
+            savedHeight = VEP_CONFIG.DEFAULT_HEIGHT,
             readyCheckDim = false,
             disableInstanced = false,
+            matchRaidMarkers = true,
+            matchDigits = true,
+            matchMyName = true,
             keywordsText = defaultKeywordsStr,
             channels = { say = true, party = true, raid = true, emote = true, instance = true },
             modes = { ungrouped = true, party = true, raid = true },
@@ -816,8 +886,12 @@ local function OnChatMessage(self, event, message, sender, ...)
         }
         
         if REP_SavedDB.isVisible == nil then REP_SavedDB.isVisible = true end
+        if REP_SavedDB.isMinimized == nil then REP_SavedDB.isMinimized = false end
         if REP_SavedDB.readyCheckDim == nil then REP_SavedDB.readyCheckDim = false end
         if REP_SavedDB.disableInstanced == nil then REP_SavedDB.disableInstanced = false end
+        if REP_SavedDB.matchRaidMarkers == nil then REP_SavedDB.matchRaidMarkers = true end
+        if REP_SavedDB.matchDigits == nil then REP_SavedDB.matchDigits = true end
+        if REP_SavedDB.matchMyName == nil then REP_SavedDB.matchMyName = true end
         if REP_SavedDB.keywordsText == nil then REP_SavedDB.keywordsText = defaultKeywordsStr end
         REP_SavedDB.channels = REP_SavedDB.channels or { say = true, party = true, raid = true, emote = true, instance = true }
         REP_SavedDB.modes = REP_SavedDB.modes or { ungrouped = true, party = true, raid = true }
@@ -835,10 +909,15 @@ local function OnChatMessage(self, event, message, sender, ...)
         cbCleanDimmed:SetChecked(REP_SavedDB.cleanup.dimmed)
         cbReadyDim:SetChecked(REP_SavedDB.readyCheckDim)
         cbDisableInstanced:SetChecked(REP_SavedDB.disableInstanced)
+        cbMatchRaidMarkers:SetChecked(REP_SavedDB.matchRaidMarkers)
+        cbMatchDigits:SetChecked(REP_SavedDB.matchDigits)
+        cbMatchMyName:SetChecked(REP_SavedDB.matchMyName)
         keywordsEditBox:SetText(REP_SavedDB.keywordsText)
 
         vep_mainframe.lastReadyCheckTime = REP_SavedDB.lastReadyCheckTime or 0
         
+        ApplyMinimizedState(REP_SavedDB.isMinimized)
+
         if REP_SavedDB.isVisible then
             vep_mainframe:Show()
         else
@@ -916,8 +995,18 @@ local function OnChatMessage(self, event, message, sender, ...)
     local results = {}
     local hasMatchInThisLine = false
 
-    if message:find("[▼●◆▲★♦]") or message:find("{.-}") or message:find("|T.-|t") or message:find("|t") then
-        hasMatchInThisLine = true
+    -- Global Match Check: Match My Name (Blizzard name, full TRP name, or TRP first name) across full raw message
+    if REP_SavedDB and REP_SavedDB.matchMyName then
+        local blizzName, trpName, trpFirstName = ResolvePlayerNames()
+        local lowerMsg = message:lower()
+        
+        if blizzName and blizzName ~= "" and lowerMsg:find(EscapePattern(blizzName:lower())) then
+            hasMatchInThisLine = true
+        elseif trpName and trpName ~= "" and lowerMsg:find(EscapePattern(trpName:lower())) then
+            hasMatchInThisLine = true
+        elseif trpFirstName and trpFirstName ~= "" and lowerMsg:find(EscapePattern(trpFirstName:lower())) then
+            hasMatchInThisLine = true
+        end
     end
 
     for match in message:gmatch(pattern) do
@@ -984,13 +1073,34 @@ chatFrame:SetScript("OnEvent", OnChatMessage)
 -- 8. Slash Command Integration
 -------------------------------------------------------------------------------
 SLASH_ROLEPLAYEVENTPARSER1 = "/reparse"
+SLASH_ROLEPLAYEVENTPARSER2 = "/rp-parse"
 
-SlashCmdList["ROLEPLAYEVENTPARSER"] = function()
-    if vep_mainframe:IsShown() then
-        vep_mainframe:Hide()
-        if REP_SavedDB then REP_SavedDB.isVisible = false end
+local function HandleSlashCommand(msg)
+    local command = trim(msg:lower())
+
+    if command == "reset" then
+        if REP_SavedDB then
+            REP_SavedDB.isMinimized = false
+            REP_SavedDB.savedWidth = VEP_CONFIG.DEFAULT_WIDTH
+            REP_SavedDB.savedHeight = VEP_CONFIG.DEFAULT_HEIGHT
+            REP_SavedDB.isVisible = true
+        end
+
+        ApplyMinimizedState(false)
+        RoleplayEventParserFrame:ClearAllPoints()
+        RoleplayEventParserFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        RoleplayEventParserFrame:SetSize(VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT)
+        RoleplayEventParserFrame:Show()
+        RoleplayEventParserFrame:UpdateLayoutWidths()
     else
-        vep_mainframe:Show()
-        if REP_SavedDB then REP_SavedDB.isVisible = true end
+        if vep_mainframe:IsShown() then
+            vep_mainframe:Hide()
+            if REP_SavedDB then REP_SavedDB.isVisible = false end
+        else
+            vep_mainframe:Show()
+            if REP_SavedDB then REP_SavedDB.isVisible = true end
+        end
     end
 end
+
+SlashCmdList["ROLEPLAYEVENTPARSER"] = HandleSlashCommand
