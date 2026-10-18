@@ -1,12 +1,9 @@
-name: Package and Release Addon
+name: Clean Build and Release
 
 on:
   push:
     tags:
       - 'v*'
-
-permissions:
-  contents: write
 
 jobs:
   release:
@@ -14,14 +11,34 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Run BigWigs Packager
-        uses: BigWigsMods/packager@v2
+      - name: Package Addon
+        run: |
+          # Create the exact folder name expected inside the zip
+          mkdir -p RoleplayEventParser
+          
+          # Copy your addon files into the folder
+          cp RoleplayEventParser.lua RoleplayEventParser/
+          cp RoleplayEventParser.toc RoleplayEventParser/
+          cp CHANGELOG.md RoleplayEventParser/
+          
+          # Create the distribution zip containing the folder
+          zip -r RoleplayEventParser-${{ github.ref_name }}.zip RoleplayEventParser/
+          
+          # Verify contents of the zip locally in the log for debugging
+          unzip -l RoleplayEventParser-${{ github.ref_name }}.zip
+
+      - name: Upload to CurseForge
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: -c 1686104 -r release
+        run: |
+          VERSION=${{ github.ref_name }}
+          # Strip the leading 'v' if your versioning prefers clean numbers, or keep it
+          CLEAN_VERSION=${VERSION#v}
+          
+          echo "Uploading version $CLEAN_VERSION to CurseForge..."
+          
+          curl -X POST https://downloads.curseforge.com/api/projects/1686104/upload-file \
+            -H "X-Api-Token: $CF_API_KEY" \
+            -F "file=@RoleplayEventParser-$VERSION.zip" \
+            -F "metadata={\"releaseType\":\"release\",\"changelog\":\"Check CHANGELOG.md\",\"changelogType\":\"markdown\",\"gameVersions\":[120105]}"
