@@ -32,4 +32,4 @@ jobs:
           CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: -c 1686104 -r release -z
+          args: -c 1686104 -r release
