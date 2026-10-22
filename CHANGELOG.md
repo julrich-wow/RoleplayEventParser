@@ -1,3 +1,9 @@
+## Release 1.0.20
+- Implemented new configurable logic
+
+## Release 1.0.19
+- Fixed window visibility persistance.
+
 ## Release 1.0.18
 - Added new matching options in settings: match raid markers, match digits, and match my name. Mouse over them to see a tooltip explaining each one.
 - Reformatted the Settings window.

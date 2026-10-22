@@ -20,11 +20,12 @@ local table_insert = table.insert
 local table_remove = table.remove
 local table_sort = table.sort
 local math_max = math.max
+local IsShiftKeyDown = IsShiftKeyDown
 
 local VEP_CONFIG = {
-    DEFAULT_WIDTH = 680,
+    DEFAULT_WIDTH = 750,
     DEFAULT_HEIGHT = 400,
-    MIN_WIDTH = 680,
+    MIN_WIDTH = 740,
     MIN_HEIGHT = 200,
     MAX_WIDTH = 1400,
     MAX_HEIGHT = 1000,
@@ -32,11 +33,11 @@ local VEP_CONFIG = {
     TOOLTIP_DELAY = 1.0,
     
     COLUMNS = {
-        { name = "Time",         width = 65,  wrap = false },
-        { name = "Character",    width = 120, wrap = true  },
-        { name = "Avatar Name",  width = 110, wrap = true  },
-        { name = "Emote Result", width = 120, wrap = true  },
-        { name = "Emote Text",   width = 220, wrap = true  }
+        { name = "Time",         width = 75,  wrap = false, key = "time" },
+        { name = "Character",    width = 145, wrap = true,  key = "character" },
+        { name = "Avatar Name",  width = 135, wrap = true,  key = "avatar" },
+        { name = "Emote Result", width = 140, wrap = true,  key = "marker" },
+        { name = "Emote Text",   width = 220, wrap = true,  key = "text" }
     },
     
     KEYWORDS = { "damage", "safe", "guarding", "intercepting", "hitpoints", "hit points", "hit-points", "heal" },
@@ -104,6 +105,74 @@ local function GetActiveKeywords()
     end
 
     return (#cachedKeywordsList > 0) and cachedKeywordsList or VEP_CONFIG.KEYWORDS
+end
+
+-------------------------------------------------------------------------------
+-- Raid Marker Extraction & Multi-Sort Logic
+-------------------------------------------------------------------------------
+local MARKER_WEIGHTS = {
+    -- Star (1)
+    ["{star}"] = 1, ["{rt1}"] = 1, ["{yellow}"] = 1, ["★"] = 1,
+    -- Circle (2)
+    ["{circle}"] = 2, ["{rt2}"] = 2, ["{orange}"] = 2, ["●"] = 2,
+    -- Diamond (3)
+    ["{diamond}"] = 3, ["{rt3}"] = 3, ["{purple}"] = 3, ["◆"] = 3,
+    -- Triangle (4)
+    ["{triangle}"] = 4, ["{rt4}"] = 4, ["{green}"] = 4, ["▼"] = 4,
+    -- Moon (5)
+    ["{moon}"] = 5, ["{rt5}"] = 5, ["{silver}"] = 5, ["{white}"] = 5, ["♦"] = 5,
+    -- Square (6)
+    ["{square}"] = 6, ["{rt6}"] = 6, ["{blue}"] = 6, ["■"] = 6, ["⬛"] = 6,
+    -- Cross (7)
+    ["{cross}"] = 7, ["{rt7}"] = 7, ["{x}"] = 7, ["{red}"] = 7, ["✖"] = 7, ["✕"] = 7, ["X"] = 7,
+    -- Skull (8)
+    ["{skull}"] = 8, ["{rt8}"] = 8, ["☠"] = 8, ["▲"] = 8
+}
+
+local function GetFirstRaidMarkerWeight(text)
+    if not text or text == "" then return 99 end
+
+    local lower = text:lower()
+    local earliestPos = nil
+    local earliestWeight = 99
+
+    -- 1. Check for texture paths embedded from ReplaceIconAndGroupExpressions
+    local texIndex = lower:match("raidtargetingicon_(%d)")
+    if texIndex then
+        local weight = tonumber(texIndex)
+        local pos = lower:find("raidtargetingicon_")
+        if pos then
+            earliestPos = pos
+            earliestWeight = weight
+        end
+    end
+
+    -- 2. Check for token strings or symbols
+    for token, weight in pairs(MARKER_WEIGHTS) do
+        local pos = lower:find(token, 1, true)
+        if pos and (not earliestPos or pos < earliestPos) then
+            earliestPos = pos
+            earliestWeight = weight
+        end
+    end
+
+    return earliestWeight
+end
+
+local function GetRowValueByKey(row, colKey)
+    if colKey == "time" then
+        return row.timestamp or 0
+    elseif colKey == "character" then
+        return (row.characterName or ""):lower()
+    elseif colKey == "avatar" then
+        return (row.avatarName or ""):lower()
+    elseif colKey == "marker" then
+        -- Check both raw result and full text to capture markers accurately regardless of column placement
+        return GetFirstRaidMarkerWeight((row.emoteResult or "") .. " " .. (row.emoteText or ""))
+    elseif colKey == "text" then
+        return (row.emoteText or ""):lower()
+    end
+    return 0
 end
 
 -------------------------------------------------------------------------------
@@ -249,6 +318,36 @@ headerFrame:SetHeight(22)
 
 local headerButtons = {}
 local currentOffsetX = 0
+
+local function UpdateHeaderVisuals()
+    local sortRules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "time", asc = false } }
+    
+    for i, col in ipairs(VEP_CONFIG.COLUMNS) do
+        local headerBtn = headerButtons[i]
+        if headerBtn then
+            local ruleIndex, ruleFound = nil, nil
+            for idx, rule in ipairs(sortRules) do
+                if rule.col == col.key then
+                    ruleIndex = idx
+                    ruleFound = rule
+                    break
+                end
+            end
+
+            local baseName = col.name
+            if ruleFound then
+                local sign = ruleFound.asc and "+" or "-"
+                local indicator = "[" .. sign .. ruleIndex .. "]"
+                headerBtn.text:SetText(baseName .. " " .. indicator)
+                headerBtn.text:SetTextColor(1, 0.82, 0)
+            else
+                headerBtn.text:SetText(baseName)
+                headerBtn.text:SetTextColor(0.9, 0.9, 0.9)
+            end
+        end
+    end
+end
+
 for i, col in ipairs(VEP_CONFIG.COLUMNS) do
     local header = CreateFrame("Button", nil, headerFrame, "BackdropTemplate")
     header:SetSize(col.width, 22)
@@ -264,7 +363,51 @@ for i, col in ipairs(VEP_CONFIG.COLUMNS) do
     local text = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     text:SetPoint("LEFT", header, "LEFT", 6, 0)
     text:SetText(col.name)
-    
+    header.text = text
+    header.columnKey = col.key
+
+    AttachDelayedTooltip(header, "Left-Click: Set Primary Sort || Shift-Click: Add Secondary Sort || Right-Click: Reset Sort")
+
+    header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    header:SetScript("OnClick", function(self, button)
+        REP_SavedDB = REP_SavedDB or {}
+        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "time", asc = false } }
+        local rules = REP_SavedDB.sortRules
+
+        if button == "RightButton" then
+            REP_SavedDB.sortRules = { { col = "time", asc = false } }
+        else
+            local isShift = IsShiftKeyDown()
+            local targetKey = self.columnKey
+            local existingIndex = nil
+
+            for idx, rule in ipairs(rules) do
+                if rule.col == targetKey then
+                    existingIndex = idx
+                    break
+                end
+            end
+
+            if isShift then
+                if existingIndex then
+                    rules[existingIndex].asc = not rules[existingIndex].asc
+                else
+                    table_insert(rules, { col = targetKey, asc = true })
+                end
+            else
+                if existingIndex == 1 then
+                    rules[1].asc = not rules[1].asc
+                else
+                    local newAsc = existingIndex and rules[existingIndex].asc or true
+                    REP_SavedDB.sortRules = { { col = targetKey, asc = newAsc } }
+                end
+            end
+        end
+
+        UpdateHeaderVisuals()
+        vep_mainframe:SortAndRefreshRows()
+    end)
+
     headerButtons[i] = header
     currentOffsetX = currentOffsetX + col.width
 end
@@ -274,7 +417,7 @@ scrollFrame:SetPoint("TOPLEFT", headerFrame, "BOTTOMLEFT", 0, -4)
 scrollFrame:SetPoint("BOTTOMRIGHT", vep_mainframe, "BOTTOMRIGHT", -32, 36)
 
 local contentFrame = CreateFrame("Frame", nil, scrollFrame)
-contentFrame:SetSize(635, 1)
+contentFrame:SetSize(700, 1)
 scrollFrame:SetScrollChild(contentFrame)
 
 local resizeBackdrop = CreateFrame("Frame", nil, vep_mainframe, "BackdropTemplate")
@@ -552,7 +695,7 @@ end
 function vep_mainframe:UpdateLayoutWidths()
     if isMinimized then return end
 
-    local availableWidth = math_max(scrollFrame:GetWidth() - 5, 635)
+    local availableWidth = math_max(scrollFrame:GetWidth() - 5, 700)
     local fixedWidths = VEP_CONFIG.COLUMNS[1].width + VEP_CONFIG.COLUMNS[2].width + VEP_CONFIG.COLUMNS[3].width + VEP_CONFIG.COLUMNS[4].width
     local dynamicTextWidth = math_max(availableWidth - fixedWidths, 120)
 
@@ -642,14 +785,22 @@ function vep_mainframe:CleanUpLog()
 end
 
 function vep_mainframe:SortAndRefreshRows()
+    local sortRules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "time", asc = false } }
+
     table_sort(self.rows, function(a, b)
-        local charA = (a.characterName or ""):lower()
-        local charB = (b.characterName or ""):lower()
-        if charA ~= charB then
-            return charA < charB
-        else
-            return (a.timeString or "") > (b.timeString or "")
+        for _, rule in ipairs(sortRules) do
+            local valA = GetRowValueByKey(a, rule.col)
+            local valB = GetRowValueByKey(b, rule.col)
+
+            if valA ~= valB then
+                if rule.asc then
+                    return valA < valB
+                else
+                    return valA > valB
+                end
+            end
         end
+        return false
     end)
 
     local currentOffsetY = 0
@@ -720,6 +871,8 @@ function vep_mainframe:AddRow(timeString, characterName, avatarName, emoteResult
     row.avatarName = avatarName or ""
     row.timeString = timeString or ""
     row.timestamp = timestamp or GetTime()
+    row.emoteResult = emoteResult or ""
+    row.emoteText = emoteText or ""
     row.cells = {}
     row.isDimmed = isDimmed or false
     row.lastClickTime = 0
@@ -741,7 +894,7 @@ function vep_mainframe:AddRow(timeString, characterName, avatarName, emoteResult
     row:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
     row:SetScript("OnClick", OnRowClick)
 
-    AttachDelayedTooltip(row, "Middle click to whisper | Double right-click to delete")
+    AttachDelayedTooltip(row, "Middle click to whisper || Double right-click to delete")
 
     local values = { timeString, characterName, avatarName, emoteResult, emoteText }
     local currentOffsetX = 0
@@ -903,7 +1056,8 @@ local function OnChatMessage(self, event, message, sender, ...)
             keywordsText = defaultKeywordsStr,
             channels = { say = true, party = true, raid = true, emote = true, instance = true },
             modes = { ungrouped = true, party = true, raid = true },
-            cleanup = { predates = true, dimmed = true }
+            cleanup = { predates = true, dimmed = true },
+            sortRules = { { col = "time", asc = false } }
         }
         
         if REP_SavedDB.isVisible == nil then REP_SavedDB.isVisible = true end
@@ -918,6 +1072,7 @@ local function OnChatMessage(self, event, message, sender, ...)
         REP_SavedDB.channels = REP_SavedDB.channels or { say = true, party = true, raid = true, emote = true, instance = true }
         REP_SavedDB.modes = REP_SavedDB.modes or { ungrouped = true, party = true, raid = true }
         REP_SavedDB.cleanup = REP_SavedDB.cleanup or { predates = true, dimmed = true }
+        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "time", asc = false } }
 
         cbSay:SetChecked(REP_SavedDB.channels.say)
         cbParty:SetChecked(REP_SavedDB.channels.party)
@@ -939,6 +1094,7 @@ local function OnChatMessage(self, event, message, sender, ...)
         vep_mainframe.lastReadyCheckTime = REP_SavedDB.lastReadyCheckTime or 0
         
         ApplyMinimizedState(REP_SavedDB.isMinimized)
+        UpdateHeaderVisuals()
 
         if REP_SavedDB.isVisible then
             vep_mainframe:Show()
@@ -1077,6 +1233,7 @@ local function OnChatMessage(self, event, message, sender, ...)
         if vep_action_emote ~= "" then table_insert(texts, vep_action_emote) end
         
         local timer = C_Timer.NewTimer(BUFFER_WINDOW, function()
+            FlushAuthorMarker = function() end
             FlushAuthorBuffer(cleanSender)
         end)
 
@@ -1111,9 +1268,11 @@ local function HandleSlashCommand(msg)
             REP_SavedDB.savedWidth = VEP_CONFIG.DEFAULT_WIDTH
             REP_SavedDB.savedHeight = VEP_CONFIG.DEFAULT_HEIGHT
             REP_SavedDB.isVisible = true
+            REP_SavedDB.sortRules = { { col = "time", asc = false } }
         end
 
         ApplyMinimizedState(false)
+        UpdateHeaderVisuals()
         RoleplayEventParserFrame:ClearAllPoints()
         RoleplayEventParserFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         RoleplayEventParserFrame:SetSize(VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT)
