@@ -1,5 +1,8 @@
-## Releast 1.0.21
-- Implemented search bar. Yes, you can search for raid markers as well as text in the emotes by using blue, {blue}, {square}, etc.
+## Release 1.0.22
+- Fixed bugs in the column sorting logic.
+
+## Release 1.0.21
+- Implemented search bar. Yes, you can search for raid markers as well as text in the emotes by using blue, square, rt1, etc.
 
 ## Release 1.0.20
 - Implemented new configurable sort logic.

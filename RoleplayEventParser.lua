@@ -120,7 +120,7 @@ vep_mainframe:HookScript("OnHide", function() if REP_SavedDB then REP_SavedDB.is
 
 -- Confirmation Dialog
 local confirmFrame = CreateFrame("Frame", nil, vep_mainframe, "BasicFrameTemplateWithInset")
-confirmFrame:SetSize(300, 110)
+confirmFrame:SetSize(320, 120)
 confirmFrame:SetPoint("CENTER")
 confirmFrame:SetFrameLevel(vep_mainframe:GetFrameLevel() + 20)
 confirmFrame:Hide()
@@ -131,7 +131,9 @@ confirmFrame.title:SetPoint("LEFT", confirmFrame.TitleBg or confirmFrame, "LEFT"
 confirmFrame.title:SetText("Confirm Action")
 
 local confirmText = confirmFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-confirmText:SetPoint("TOP", 0, -32)
+confirmText:SetPoint("TOP", 0, -30)
+confirmText:SetWidth(290)
+confirmText:SetJustifyH("CENTER")
 
 local function CreateButton(parent, width, height, text, tooltip, onClick)
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
@@ -142,8 +144,8 @@ local function CreateButton(parent, width, height, text, tooltip, onClick)
     return btn
 end
 
-CreateButton(confirmFrame, 80, 22, "Yes", nil, function() if confirmFrame.onConfirm then confirmFrame.onConfirm() end; confirmFrame:Hide() end):SetPoint("BOTTOMLEFT", 45, 12)
-CreateButton(confirmFrame, 80, 22, "No", nil, function() confirmFrame:Hide() end):SetPoint("BOTTOMRIGHT", -45, 12)
+CreateButton(confirmFrame, 80, 22, "Yes", nil, function() if confirmFrame.onConfirm then confirmFrame.onConfirm() end; confirmFrame:Hide() end):SetPoint("BOTTOMLEFT", 55, 14)
+CreateButton(confirmFrame, 80, 22, "No", nil, function() confirmFrame:Hide() end):SetPoint("BOTTOMRIGHT", -55, 14)
 
 local function ShowConfirmDialog(text, cb)
     confirmText:SetText(text)
@@ -206,7 +208,7 @@ headerFrame:SetHeight(22)
 local headerButtons, currentOffsetX = {}, 0
 
 local function UpdateHeaderVisuals()
-    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true }, { col = "time", asc = false } }
+    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true } }
     for i, col in ipairs(VEP_CONFIG.COLUMNS) do
         local btn = headerButtons[i]
         if btn then
@@ -240,22 +242,41 @@ for i, col in ipairs(VEP_CONFIG.COLUMNS) do
     header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     header:SetScript("OnClick", function(self, button)
         REP_SavedDB = REP_SavedDB or {}
-        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true }, { col = "time", asc = false } }
+        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true } }
         local rules = REP_SavedDB.sortRules
+        local targetKey = self.columnKey
 
         if button == "RightButton" then
-            REP_SavedDB.sortRules = { { col = "character", asc = true }, { col = "time", asc = false } }
+            REP_SavedDB.sortRules = { { col = "character", asc = true } }
         else
-            local isShift, targetKey, existingIdx = IsShiftKeyDown(), self.columnKey, nil
-            for idx, r in ipairs(rules) do if r.col == targetKey then existingIdx = idx; break end end
+            local isShift = IsShiftKeyDown()
+            local existingIdx = nil
+            for idx, r in ipairs(rules) do
+                if r.col == targetKey then
+                    existingIdx = idx
+                    break
+                end
+            end
+
             if isShift then
-                if existingIdx then rules[existingIdx].asc = not rules[existingIdx].asc
-                else table_insert(rules, { col = targetKey, asc = true }) end
+                if existingIdx then
+                    rules[existingIdx].asc = not rules[existingIdx].asc
+                else
+                    table_insert(rules, { col = targetKey, asc = true })
+                end
             else
-                if existingIdx == 1 then rules[1].asc = not rules[1].asc
-                else REP_SavedDB.sortRules = { { col = targetKey, asc = existingIdx and rules[existingIdx].asc or true } } end
+                if #rules == 1 and rules[1].col == targetKey then
+                    rules[1].asc = not rules[1].asc
+                else
+                    local asc = true
+                    if existingIdx then
+                        asc = rules[existingIdx].asc
+                    end
+                    REP_SavedDB.sortRules = { { col = targetKey, asc = asc } }
+                end
             end
         end
+
         UpdateHeaderVisuals()
         vep_mainframe:SortAndRefreshRows()
     end)
@@ -457,18 +478,20 @@ function vep_mainframe:UpdateLayoutWidths()
     end
 
     for _, row in ipairs(self.rows) do
-        row:SetWidth(availWidth)
-        local rHeight = 22
-        local cOffset = 0
-        for i, col in ipairs(VEP_CONFIG.COLUMNS) do
-            if row.cells[i] then
-                row.cells[i]:SetWidth(col.width - 10)
-                row.cells[i]:SetPoint("TOPLEFT", row, "TOPLEFT", cOffset + 6, -4)
-                rHeight = math_max(rHeight, row.cells[i]:GetStringHeight() + 8)
+        if row then
+            row:SetWidth(availWidth)
+            local rHeight = 22
+            local cOffset = 0
+            for i, col in ipairs(VEP_CONFIG.COLUMNS) do
+                if row.cells[i] then
+                    row.cells[i]:SetWidth(col.width - 10)
+                    row.cells[i]:SetPoint("TOPLEFT", row, "TOPLEFT", cOffset + 6, -4)
+                    rHeight = math_max(rHeight, row.cells[i]:GetStringHeight() + 8)
+                end
+                cOffset = cOffset + col.width
             end
-            cOffset = cOffset + col.width
+            row:SetHeight(rHeight)
         end
-        row:SetHeight(rHeight)
     end
     self:SortAndRefreshRows()
 end
@@ -476,7 +499,7 @@ end
 vep_mainframe:SetScript("OnSizeChanged", function() vep_mainframe:UpdateLayoutWidths() end)
 
 function vep_mainframe:ClearLog()
-    for _, row in ipairs(self.rows) do row:Hide(); row:SetParent(nil) end
+    for _, row in ipairs(self.rows) do if row then row:Hide(); row:SetParent(nil) end end
     vep_mainframe.rows = {}
     if REP_SavedDB then REP_SavedDB.rows = {} end
     contentFrame:SetHeight(1)
@@ -488,13 +511,15 @@ function vep_mainframe:CleanUpLog()
     local delDimmed = REP_SavedDB and REP_SavedDB.cleanup and REP_SavedDB.cleanup.dimmed
 
     for _, row in ipairs(self.rows) do
-        local predates = hasRC and (row.timestamp and row.timestamp < self.lastReadyCheckTime)
-        if (delPredates and predates) or (delDimmed and row.isDimmed) then
-            row:Hide(); row:SetParent(nil)
-        else
-            table_insert(keptRows, row)
-            if REP_SavedDB and REP_SavedDB.rows then
-                for _, sData in ipairs(REP_SavedDB.rows) do if sData.timestamp == row.timestamp then table_insert(keptSaved, sData); break end end
+        if row then
+            local predates = hasRC and (row.timestamp and row.timestamp < self.lastReadyCheckTime)
+            if (delPredates and predates) or (delDimmed and row.isDimmed) then
+                row:Hide(); row:SetParent(nil)
+            else
+                table_insert(keptRows, row)
+                if REP_SavedDB and REP_SavedDB.rows then
+                    for _, sData in ipairs(REP_SavedDB.rows) do if sData.timestamp == row.timestamp then table_insert(keptSaved, sData); break end end
+                end
             end
         end
     end
@@ -504,49 +529,84 @@ function vep_mainframe:CleanUpLog()
 end
 
 local function GetRowValue(row, key)
-    if key == "time" then return row.timestamp or 0
-    elseif key == "character" then return (row.characterName or ""):lower()
-    elseif key == "avatar" then return (row.avatarName or ""):lower()
-    elseif key == "marker" then return GetFirstRaidMarkerWeight((row.emoteResult or "") .. " " .. (row.emoteText or ""))
-    elseif key == "text" then return (row.emoteText or ""):lower() end
-    return 0
+    if not row then return "" end
+    if key == "time" then
+        return row.timestamp or 0
+    elseif key == "character" then
+        local raw = row.characterName or ""
+        if raw == "" then return "" end
+        return (Ambiguate(raw, "none") or raw):lower()
+    elseif key == "avatar" then
+        local raw = row.avatarName or ""
+        if raw == "" then return "" end
+        return (Ambiguate(raw, "none") or raw):lower()
+    elseif key == "marker" then
+        return GetFirstRaidMarkerWeight((row.emoteResult or "") .. " " .. (row.emoteText or ""))
+    elseif key == "text" then
+        return (row.emoteText or ""):lower()
+    end
+    return ""
 end
 
 function vep_mainframe:SortAndRefreshRows()
-    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true }, { col = "time", asc = false } }
+    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true } }
     local filter = searchEditBox and searchEditBox:GetText():lower() or ""
 
+    -- Safeguard: strip out any nil entries from self.rows before sorting
+    local cleanedRows = {}
+    for _, r in ipairs(self.rows) do
+        if r then table_insert(cleanedRows, r) end
+    end
+    self.rows = cleanedRows
+
     table_sort(self.rows, function(a, b)
+        if not a or not b then return false end
         for _, r in ipairs(rules) do
             local vA, vB = GetRowValue(a, r.col), GetRowValue(b, r.col)
-            if vA ~= vB then return r.asc and vA < vB or vA > vB end
+            if vA ~= vB then
+                if r.asc then
+                    return vA < vB
+                else
+                    return vA > vB
+                end
+            end
         end
-        return false
+        local tA, tB = a.timestamp or 0, b.timestamp or 0
+        if tA ~= tB then
+            return tA > tB
+        end
+        return tostring(a) < tostring(b)
     end)
 
     local offsetY, vIndex = 0, 0
     for _, row in ipairs(self.rows) do
-        local match = true
-        if filter ~= "" then
-            local combined = ((row.characterName or "") .. " " .. (row.avatarName or "") .. " " .. (row.emoteResult or "") .. " " .. (row.emoteText or "")):lower()
-            local direct = combined:find(filter, 1, true)
-            local tWeight = MARKER_WEIGHTS[filter] or MARKER_WEIGHTS["{" .. filter .. "}"]
-            local markerMatch = tWeight and (GetFirstRaidMarkerWeight((row.emoteResult or "") .. " " .. (row.emoteText or "")) == tWeight)
-            if not direct and not markerMatch then match = false end
-        end
+        if row then
+            local match = true
+            if filter ~= "" then
+                local combined = ((row.characterName or "") .. " " .. (row.avatarName or "") .. " " .. (row.emoteResult or "") .. " " .. (row.emoteText or "")):lower()
+                local direct = combined:find(filter, 1, true)
+                local tWeight = MARKER_WEIGHTS[filter] or MARKER_WEIGHTS["{" .. filter .. "}"]
+                local markerMatch = tWeight and (GetFirstRaidMarkerWeight((row.emoteResult or "") .. " " .. (row.emoteText or "")) == tWeight)
+                if not direct and not markerMatch then match = false end
+            end
 
-        if match then
-            row:Show(); row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", 0, -offsetY)
-            vIndex = vIndex + 1
-            row.rowIndex = vIndex
-            row:SetBackdropColor(vIndex % 2 == 0 and 0.1 or 0.2, vIndex % 2 == 0 and 0.1 or 0.2, vIndex % 2 == 0 and 0.1 or 0.2, vIndex % 2 == 0 and 0.4 or 0.2)
-            offsetY = offsetY + row:GetHeight()
-        else
-            row:Hide()
+            if match then
+                row:Show(); row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", 0, -offsetY)
+                vIndex = vIndex + 1
+                row.rowIndex = vIndex
+                row:SetBackdropColor(vIndex % 2 == 0 and 0.1 or 0.2, vIndex % 2 == 0 and 0.1 or 0.2, vIndex % 2 == 0 and 0.1 or 0.2, vIndex % 2 == 0 and 0.4 or 0.2)
+                offsetY = offsetY + row:GetHeight()
+            else
+                row:Hide()
+            end
         end
     end
     contentFrame:SetHeight(math_max(offsetY, 1))
+
+    if scrollFrame.SetVerticalScroll then
+        scrollFrame:SetVerticalScroll(0)
+    end
 end
 
 function vep_mainframe:AddRow(timeStr, charName, avName, resText, emoteText, isDimmed, timestamp, skipSave)
@@ -661,12 +721,26 @@ local function ResolveCharacterName(cleanSender, playerClean)
 end
 
 local chatFrame, authorBuffers, BUFFER_WINDOW = CreateFrame("Frame"), {}, 2.5
+local lastCheckedPromptSession = 0
+
+local function CheckRowLimitPrompt()
+    if REP_SavedDB and REP_SavedDB.rows and #REP_SavedDB.rows > 200 then
+        local sessionKey = (vep_mainframe.lastReadyCheckTime or 0) > 0 and vep_mainframe.lastReadyCheckTime or -1
+        if lastCheckedPromptSession ~= sessionKey then
+            lastCheckedPromptSession = sessionKey
+            ShowConfirmDialog("Log has grown to " .. #REP_SavedDB.rows .. " rows. Would you like to clear the log?", function()
+                vep_mainframe:ClearLog()
+            end)
+        end
+    end
+end
 
 local function FlushAuthorBuffer(cleanSender)
     local buf = authorBuffers[cleanSender]
     if not buf or not buf.hasValidMatch then return end
     authorBuffers[cleanSender] = nil
     vep_mainframe:AddRow(buf.timeString, buf.characterName, buf.avatarName, table.concat(buf.results, " "), table.concat(buf.texts, " "))
+    CheckRowLimitPrompt()
 end
 
 chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
@@ -689,7 +763,7 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
         REP_SavedDB.channels = REP_SavedDB.channels or { say = true, party = true, raid = true, emote = true, instance = true }
         REP_SavedDB.modes = REP_SavedDB.modes or { ungrouped = true, party = true, raid = true }
         REP_SavedDB.cleanup = REP_SavedDB.cleanup or { predates = true, dimmed = true }
-        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true }, { col = "time", asc = false } }
+        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true } }
 
         cbSay:SetChecked(REP_SavedDB.channels.say)
         cbParty:SetChecked(REP_SavedDB.channels.party)
@@ -720,6 +794,8 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
             REP_SavedDB.rows = {}
             for _, e in ipairs(saved) do vep_mainframe:AddRow(e.timeString, e.characterName, e.avatarName, e.emoteResult, e.emoteText, e.isDimmed, e.timestamp, false) end
         end
+
+        CheckRowLimitPrompt()
         return
     end
 
@@ -729,12 +805,15 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
             REP_SavedDB.lastReadyCheckTime = vep_mainframe.lastReadyCheckTime
             if REP_SavedDB.readyCheckDim and vep_mainframe.rows then
                 for _, row in ipairs(vep_mainframe.rows) do
-                    row.isDimmed = true
-                    for _, c in ipairs(row.cells) do c:SetAlpha(0.5) end
-                    for _, s in ipairs(REP_SavedDB.rows or {}) do if s.timestamp == row.timestamp then s.isDimmed = true end end
+                    if row then
+                        row.isDimmed = true
+                        for _, c in ipairs(row.cells) do c:SetAlpha(0.5) end
+                        for _, s in ipairs(REP_SavedDB.rows or {}) do if s.timestamp == row.timestamp then s.isDimmed = true end end
+                    end
                 end
             end
         end
+        CheckRowLimitPrompt()
         return
     end
 
@@ -811,10 +890,11 @@ SLASH_ROLEPLAYEVENTPARSER1 = "/rp-parse"
 SlashCmdList["ROLEPLAYEVENTPARSER"] = function(msg)
     if trim(msg:lower()) == "reset" then
         if REP_SavedDB then
-            REP_SavedDB.isMinimized, REP_SavedDB.savedWidth, REP_SavedDB.savedHeight, REP_SavedDB.isVisible, REP_SavedDB.sortRules = false, VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT, true, { { col = "character", asc = true }, { col = "time", asc = false } }
+            REP_SavedDB.isMinimized, REP_SavedDB.savedWidth, REP_SavedDB.savedHeight, REP_SavedDB.isVisible, REP_SavedDB.sortRules = false, VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT, true, { { col = "character", asc = true } }
         end
         ApplyMinimizedState(false)
         UpdateHeaderVisuals()
+        vep_mainframe:SortAndRefreshRows()
         RoleplayEventParserFrame:ClearAllPoints()
         RoleplayEventParserFrame:SetPoint("CENTER")
         RoleplayEventParserFrame:SetSize(VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT)
