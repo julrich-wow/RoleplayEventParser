@@ -5,7 +5,7 @@ local frameName = "RoleplayEventParserFrame"
 -------------------------------------------------------------------------------
 -- 0. Configuration & Performance Caches
 -------------------------------------------------------------------------------
-local GetTime, date, UnitName, Ambiguate = GetTime, date, UnitName, Ambiguate
+local GetTime, time, date, UnitName, Ambiguate = GetTime, time, date, UnitName, Ambiguate
 local IsInGroup, IsInRaid, IsInInstance = IsInGroup, IsInRaid, IsInInstance
 local GetNumGroupMembers, GetNumSubgroupMembers = GetNumGroupMembers, GetNumSubgroupMembers
 local table_insert, table_remove, table_sort, math_max = table.insert, table.remove, table.sort, math.max
@@ -15,7 +15,7 @@ local VEP_CONFIG = {
     MIN_WIDTH = 740, MIN_HEIGHT = 200, MAX_WIDTH = 1400, MAX_HEIGHT = 1000,
     DOUBLE_CLICK_THRESHOLD = 0.3, TOOLTIP_DELAY = 1.0,
     COLUMNS = {
-        { name = "Time",         width = 75,  wrap = false, key = "time" },
+        { name = "Date / Time",  width = 135, wrap = false, key = "time" },
         { name = "Character",    width = 145, wrap = true,  key = "character" },
         { name = "Avatar Name",  width = 135, wrap = true,  key = "avatar" },
         { name = "Emote Result", width = 140, wrap = true,  key = "marker" },
@@ -208,7 +208,7 @@ headerFrame:SetHeight(22)
 local headerButtons, currentOffsetX = {}, 0
 
 local function UpdateHeaderVisuals()
-    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true } }
+    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true }, { col = "time", asc = false } }
     for i, col in ipairs(VEP_CONFIG.COLUMNS) do
         local btn = headerButtons[i]
         if btn then
@@ -242,12 +242,12 @@ for i, col in ipairs(VEP_CONFIG.COLUMNS) do
     header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     header:SetScript("OnClick", function(self, button)
         REP_SavedDB = REP_SavedDB or {}
-        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true } }
+        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true }, { col = "time", asc = false } }
         local rules = REP_SavedDB.sortRules
         local targetKey = self.columnKey
 
         if button == "RightButton" then
-            REP_SavedDB.sortRules = { { col = "character", asc = true } }
+            REP_SavedDB.sortRules = { { col = "character", asc = true }, { col = "time", asc = false } }
         else
             local isShift = IsShiftKeyDown()
             local existingIdx = nil
@@ -549,7 +549,7 @@ local function GetRowValue(row, key)
 end
 
 function vep_mainframe:SortAndRefreshRows()
-    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true } }
+    local rules = (REP_SavedDB and REP_SavedDB.sortRules) or { { col = "character", asc = true }, { col = "time", asc = false } }
     local filter = searchEditBox and searchEditBox:GetText():lower() or ""
 
     -- Safeguard: strip out any nil entries from self.rows before sorting
@@ -613,7 +613,7 @@ function vep_mainframe:AddRow(timeStr, charName, avName, resText, emoteText, isD
     local width = contentFrame:GetWidth()
     local row = CreateFrame("Button", nil, contentFrame, "BackdropTemplate")
     row.characterName, row.avatarName, row.timeString = charName or "", avName or "", timeStr or ""
-    row.timestamp, row.emoteResult, row.emoteText = timestamp or GetTime(), resText or "", emoteText or ""
+    row.timestamp, row.emoteResult, row.emoteText = timestamp or time(), resText or "", emoteText or ""
     row.cells, row.isDimmed = {}, isDimmed or false
 
     row:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
@@ -763,7 +763,7 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
         REP_SavedDB.channels = REP_SavedDB.channels or { say = true, party = true, raid = true, emote = true, instance = true }
         REP_SavedDB.modes = REP_SavedDB.modes or { ungrouped = true, party = true, raid = true }
         REP_SavedDB.cleanup = REP_SavedDB.cleanup or { predates = true, dimmed = true }
-        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true } }
+        REP_SavedDB.sortRules = REP_SavedDB.sortRules or { { col = "character", asc = true }, { col = "time", asc = false } }
 
         cbSay:SetChecked(REP_SavedDB.channels.say)
         cbParty:SetChecked(REP_SavedDB.channels.party)
@@ -800,7 +800,7 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
     end
 
     if event == "READY_CHECK" then
-        vep_mainframe.lastReadyCheckTime = GetTime()
+        vep_mainframe.lastReadyCheckTime = time()
         if REP_SavedDB then
             REP_SavedDB.lastReadyCheckTime = vep_mainframe.lastReadyCheckTime
             if REP_SavedDB.readyCheckDim and vep_mainframe.rows then
@@ -861,7 +861,7 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
     local actionEmote = trim(message:gsub(removePattern, ""))
     if event == "CHAT_MSG_EMOTE" then actionEmote = trim(actionEmote:gsub("^" .. cleanSender .. "%s*", "")) end
 
-    local avatarName, charName, timeStr = cleanSender, ResolveCharacterName(cleanSender, playerClean) or cleanSender, date("%H:%M:%S")
+    local avatarName, charName, timeStr = cleanSender, ResolveCharacterName(cleanSender, playerClean) or cleanSender, date("%m/%d/%Y %H:%M:%S")
 
     if authorBuffers[cleanSender] then
         local buf = authorBuffers[cleanSender]
@@ -890,7 +890,7 @@ SLASH_ROLEPLAYEVENTPARSER1 = "/rp-parse"
 SlashCmdList["ROLEPLAYEVENTPARSER"] = function(msg)
     if trim(msg:lower()) == "reset" then
         if REP_SavedDB then
-            REP_SavedDB.isMinimized, REP_SavedDB.savedWidth, REP_SavedDB.savedHeight, REP_SavedDB.isVisible, REP_SavedDB.sortRules = false, VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT, true, { { col = "character", asc = true } }
+            REP_SavedDB.isMinimized, REP_SavedDB.savedWidth, REP_SavedDB.savedHeight, REP_SavedDB.isVisible, REP_SavedDB.sortRules = false, VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT, true, { { col = "character", asc = true }, { col = "time", asc = false } }
         end
         ApplyMinimizedState(false)
         UpdateHeaderVisuals()

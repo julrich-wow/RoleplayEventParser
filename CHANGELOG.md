@@ -1,3 +1,6 @@
+## Release 1.0.23
+- Added the date to the Time field to facilitate sorting across sessions.
+
 ## Release 1.0.22
 - Fixed bugs in the column sorting logic.
 
