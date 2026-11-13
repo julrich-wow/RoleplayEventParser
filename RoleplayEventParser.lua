@@ -25,7 +25,8 @@ local VEP_CONFIG = {
     EVENTS = {
         "ADDON_LOADED", "CHAT_MSG_SAY", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
         "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_RAID_WARNING",
-        "CHAT_MSG_EMOTE", "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER", "READY_CHECK"
+        "CHAT_MSG_EMOTE", "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER", "READY_CHECK",
+        "GROUP_ROSTER_UPDATE"
     }
 }
 
@@ -408,13 +409,108 @@ table_insert(vep_mainframe.innerElements, scrollFrame)
 table_insert(vep_mainframe.innerElements, resizeBackdrop)
 
 -------------------------------------------------------------------------------
--- 5. Minimize Controller
+-- 5. Minimize Controller & Roster Display
 -------------------------------------------------------------------------------
 local isMinimized, savedWidth, savedHeight = false, VEP_CONFIG.DEFAULT_WIDTH, VEP_CONFIG.DEFAULT_HEIGHT
 local minimizeButton = CreateButton(vep_mainframe, 20, 20, "_", nil, function() ApplyMinimizedState(not isMinimized) end)
 local closeBtn = vep_mainframe.CloseButton or vep_mainframe.closeButton
 if closeBtn then minimizeButton:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
 else minimizeButton:SetPoint("TOPRIGHT", -26, -5) end
+
+-- Roster Tracking & Display Setup
+local rosterData = { members = {}, posted = {} }
+
+-- WoW Raid Marker Icons (Sized to fit tooltip text height)
+local ICON_GREEN_TRIANGLE = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_4:12:12:0:0|t"
+local ICON_RED_X           = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_7:12:12:0:0|t"
+local ICON_SKULL           = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_8:12:12:0:0|t"
+
+local function GetGroupRoster()
+    local roster = {}
+    if IsInRaid() then
+        local num = GetNumGroupMembers()
+        for i = 1, num do
+            local name, _, _, _, _, _, _, online = GetRaidRosterInfo(i)
+            if name then
+                local cleanName = Ambiguate(name, "none"):lower()
+                table.insert(roster, { name = name, cleanName = cleanName, online = online })
+            end
+        end
+    elseif IsInGroup() then
+        local playerName = UnitName("player")
+        local playerRealm = GetRealmName()
+        local pFull = (playerRealm and playerRealm ~= "") and (playerName .. "-" .. playerRealm) or playerName
+        table.insert(roster, { name = pFull, cleanName = Ambiguate(pFull, "none"):lower(), online = true })
+        local num = GetNumSubgroupMembers()
+        for i = 1, num do
+            local uName, uRealm = UnitName("party" .. i)
+            if uName then
+                local fullName = (uRealm and uRealm ~= "") and (uName .. "-" .. uRealm) or uName
+                local online = UnitIsConnected("party" .. i)
+                table.insert(roster, { name = fullName, cleanName = Ambiguate(fullName, "none"):lower(), online = online })
+            end
+        end
+    else
+        local playerName = UnitName("player")
+        table.insert(roster, { name = playerName, cleanName = Ambiguate(playerName, "none"):lower(), online = true })
+    end
+    return roster
+end
+
+local rosterButton = CreateFrame("Button", nil, vep_mainframe)
+rosterButton:SetSize(45, 20)
+rosterButton:SetPoint("RIGHT", minimizeButton, "LEFT", -4, 0)
+rosterButton.text = rosterButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+rosterButton.text:SetPoint("CENTER", rosterButton, "CENTER", 0, 0)
+
+local function UpdateRoster()
+    local newMembers = GetGroupRoster()
+    local newPosted = {}
+    for _, m in ipairs(newMembers) do
+        local cName = m.cleanName
+        if not m.online then
+            newPosted[cName] = true -- disconnects count as having posted
+        else
+            newPosted[cName] = rosterData.posted[cName] or false
+        end
+    end
+    rosterData.members = newMembers
+    rosterData.posted = newPosted
+
+    local Y = #newMembers
+    local X = 0
+    for _, m in ipairs(newMembers) do
+        if rosterData.posted[m.cleanName] then
+            X = X + 1
+        end
+    end
+
+    if rosterButton.text then
+        rosterButton.text:SetText(X .. " / " .. Y)
+    end
+end
+
+rosterButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText("Group Roster Status", 1, 1, 1)
+    for _, m in ipairs(rosterData.members) do
+        local statusIcon
+        if not m.online then
+            statusIcon = ICON_SKULL          -- Skull raid marker for disconnected
+        elseif rosterData.posted[m.cleanName] then
+            statusIcon = ICON_GREEN_TRIANGLE -- Green Triangle raid marker for posted
+        else
+            statusIcon = ICON_RED_X          -- Red X raid marker for not posted
+        end
+        GameTooltip:AddLine(statusIcon .. " " .. m.name)
+    end
+    GameTooltip:Show()
+end)
+rosterButton:SetScript("OnLeave", function(self)
+    GameTooltip:Hide()
+end)
+
+table_insert(vep_mainframe.innerElements, rosterButton)
 
 function ApplyMinimizedState(minimized)
     isMinimized = minimized
@@ -740,6 +836,18 @@ local function FlushAuthorBuffer(cleanSender)
     if not buf or not buf.hasValidMatch then return end
     authorBuffers[cleanSender] = nil
     vep_mainframe:AddRow(buf.timeString, buf.characterName, buf.avatarName, table.concat(buf.results, " "), table.concat(buf.texts, " "))
+    
+    if cleanSender and cleanSender ~= "" then
+        local lowerSender = cleanSender:lower()
+        for _, m in ipairs(rosterData.members) do
+            if m.cleanName == lowerSender or m.name:lower() == lowerSender or Ambiguate(m.name, "none"):lower() == lowerSender then
+                rosterData.posted[m.cleanName] = true
+            end
+        end
+        rosterData.posted[lowerSender] = true
+        UpdateRoster()
+    end
+    
     CheckRowLimitPrompt()
 end
 
@@ -795,12 +903,26 @@ chatFrame:SetScript("OnEvent", function(_, event, message, sender, ...)
             for _, e in ipairs(saved) do vep_mainframe:AddRow(e.timeString, e.characterName, e.avatarName, e.emoteResult, e.emoteText, e.isDimmed, e.timestamp, false) end
         end
 
+        UpdateRoster()
         CheckRowLimitPrompt()
+        return
+    end
+
+    if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+        UpdateRoster()
         return
     end
 
     if event == "READY_CHECK" then
         vep_mainframe.lastReadyCheckTime = time()
+        for _, m in ipairs(rosterData.members) do
+            if m.online then
+                rosterData.posted[m.cleanName] = false
+            else
+                rosterData.posted[m.cleanName] = true
+            end
+        end
+        UpdateRoster()
         if REP_SavedDB then
             REP_SavedDB.lastReadyCheckTime = vep_mainframe.lastReadyCheckTime
             if REP_SavedDB.readyCheckDim and vep_mainframe.rows then
