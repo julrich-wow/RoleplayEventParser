@@ -833,8 +833,10 @@ end
 
 local function FlushAuthorBuffer(cleanSender)
     local buf = authorBuffers[cleanSender]
-    if not buf or not buf.hasValidMatch then return end
-    authorBuffers[cleanSender] = nil
+    if not buf then return end
+    authorBuffers[cleanSender] = nil -- Always clear buffer so old un-matched entries don't linger
+    if not buf.hasValidMatch then return end
+
     vep_mainframe:AddRow(buf.timeString, buf.characterName, buf.avatarName, table.concat(buf.results, " "), table.concat(buf.texts, " "))
     
     if cleanSender and cleanSender ~= "" then

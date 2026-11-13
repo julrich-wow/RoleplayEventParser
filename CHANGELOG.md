@@ -1,3 +1,6 @@
+## Release 1.0.25
+- Fixed a bug in event capture and posting.
+
 ## Release 1.0.24
 - New feature added. There is now a count in the upper right that shows how many people have posted since the last ready check. Mouse over it to see a list of names. A green icon next to their name means they have posted, a red X means they have not, and a skull means they've DC'd.
 
